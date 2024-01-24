@@ -425,7 +425,8 @@ avail_hours <- avail_hours %>%
 access_raw_filtered <- left_join(access_raw, avail_hours[,c("DEPARTMENT_ID","PROV_ID", "SLOT_BEGIN_TIME", "relevant_slot")], 
                                  by = c("DEPARTMENT_ID" = "DEPARTMENT_ID",
                                         "PROV_ID" = "PROV_ID",
-                                        "APPT_DTTM" = "SLOT_BEGIN_TIME"))
+                                        "APPT_DTTM" = "SLOT_BEGIN_TIME"),
+                                 copy = TRUE)
 
 
 ## Filter out latest appt status per relevant slot (regular and overbook slots treated separately)
