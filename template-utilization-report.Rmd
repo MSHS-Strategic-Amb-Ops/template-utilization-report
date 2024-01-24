@@ -382,9 +382,9 @@ access_raw <- access_raw_tbl %>%
                 Appt.Year, Appt.Month, Appt.DateYear, Appt.Canceled.DateYear) %>%
   mutate(sameDay_canceled = ifelse(Appt.DateYear == Appt.Canceled.DateYear, "Yes", "No")) %>%
   mutate(Appt.Status = case_when(sameDay_canceled == "Yes" & DERIVED_STATUS_DESC %in% c("Canceled","Rescheduled","Bumped") ~ paste0("SameDay ",DERIVED_STATUS_DESC),
-                                 TRUE ~ DERIVED_STATUS_DESC)) %>%
-  collect() %>%
-  mutate(PROV_NAME = trimws(gsub("\\[.*?\\]", "", PROV_NAME_WID))) 
+                                 TRUE ~ DERIVED_STATUS_DESC))
+  # collect() %>%
+  # mutate(PROV_NAME = trimws(gsub("\\[.*?\\]", "", PROV_NAME_WID))) 
 
 
 dept_mapping <- access_raw %>%
@@ -405,10 +405,62 @@ avail_hours <- availability_raw_tbl %>%
          Appt.Month = month(SLOT_DATE)) %>%
   filter(Appt.Year == 2023) %>%
   filter(TO_DATE(date_1,"YYYY-MM-DD HH24:MI:SS") > TO_DATE(SLOT_DATE)) %>%
+  filter(is.na(UNAVAILABLE_RSN_C)) %>%
+  mutate(Appt.DateYear = TO_DATE(SLOT_DATE)) %>%
+  mutate(no_openings = ifelse(ORG_REG_OPENINGS == 0, "no_opening", "reg_opening")) %>%
+  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear, SLOT_BEGIN_TIME, SLOT_LENGTH, ORG_REG_OPENINGS) %>%
+  summarise(avail_min = n()) %>%
+  mutate(relevant_slot = "Yes")
+
+
+access_raw_filtered <- access_raw %>%
+  left_join(avail_hours %>% 
+              dplyr::select(DEPARTMENT_ID,PROV_ID,SLOT_BEGIN_TIME,relevant_slot), 
+            by = c("DEPARTMENT_ID" = "DEPARTMENT_ID",
+                   "PROV_ID" = "PROV_ID",
+                   "APPT_DTTM" = "SLOT_BEGIN_TIME"))
+
+
+## Filter out latest appt status per relevant slot (regular and overbook slots treated separately)
+access_raw_filtered <- access_raw_filtered %>%
+  head(10) %>%
+  collect()
+  filter(relevant_slot == "Yes") %>%
+  arrange(DEPARTMENT_ID, PROV_NAME_WID, APPT_DTTM, desc(APPT_MADE_DTTM)) %>%
+  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NAME_WID, APPT_DTTM, Appt.DateYear, OVERBOOKED_YN) %>%
+  mutate(id = row_number()) %>%
+  filter(id == 1) 
+
+
+
+
+
+
+
+
+  
+  
+  
+  
+  
+  
+  
+  
+  
+
+
+
+# Process Available Hours ------------------------------------------------------
+avail_hours <- availability_raw_tbl %>%
+  mutate(Appt.Year = year(SLOT_DATE),
+         Appt.Month = month(SLOT_DATE)) %>%
+  filter(Appt.Year == 2023) %>%
+  filter(TO_DATE(date_1,"YYYY-MM-DD HH24:MI:SS") > TO_DATE(SLOT_DATE)) %>%
   # filter(ORG_OVBK_OPENINGS == 0) %>%
   filter(is.na(UNAVAILABLE_RSN_C)) %>%
   mutate(Appt.DateYear = TO_DATE(SLOT_DATE)) %>%
-  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear, SLOT_BEGIN_TIME, SLOT_LENGTH) %>%
+  mutate(no_openings = ifelse(ORG_REG_OPENINGS == 0, "no_opening", "reg_opening")) %>%
+  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear, SLOT_BEGIN_TIME, SLOT_LENGTH, ORG_REG_OPENINGS) %>%
   summarise(avail_min = n()) %>%
   # ungroup() %>%
   # group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear) %>%
@@ -459,6 +511,7 @@ avail_hours$VISIT_PROV_STAFF_RESOURCE_C <- access_raw$VISIT_PROV_STAFF_RESOURCE_
 
 # Process Scheduled and Arrived Hours ------------------------------------------
 scheduled_hours <- access_raw_filtered %>%
+  filter(Appt.Status %in% c("Arrived", "No Show", "SAmeDay Rescheduled", "SameDay Canceled", "SameDay Bumped")) %>%
   ungroup() %>%
   group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NAME_WID, Appt.DateYear) %>%
   summarise(sched_min = sum(APPT_LENGTH)) %>%
