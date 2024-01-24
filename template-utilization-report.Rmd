@@ -404,7 +404,8 @@ dept_mapping <- access_raw %>%
 avail_hours <- availability_raw_tbl %>%
   mutate(Appt.Year = year(SLOT_DATE),
          Appt.Month = month(SLOT_DATE)) %>%
-  filter(TO_DATE(date_1,"YYYY-MM-DD HH24:MI:SS") > TO_DATE(SLOT_DATE)) %>%
+  filter(Appt.Year == 2023) %>%
+  filter(Appt.Month > 6) %>%
   # filter(ORG_OVBK_OPENINGS == 0) %>%
   filter(is.na(UNAVAILABLE_RSN_C)) %>%
   mutate(Appt.DateYear = TO_DATE(SLOT_DATE)) %>%
@@ -441,6 +442,11 @@ access_raw_filtered <- access_raw_filtered %>%
   mutate(Appt.Status = case_when(sameDay_canceled == "Yes" & DERIVED_STATUS_DESC %in% c("Canceled","Rescheduled","Bumped") ~ paste0("SameDay ",DERIVED_STATUS_DESC),
                                  TRUE ~ DERIVED_STATUS_DESC))
 
+```
+
+
+```{r Calculate Available Hours, echo = FALSE, warning = FALSE, message = FALSE}
+
 # Continue Process Available Hours ----------------------------------------------
 avail_hours <- avail_hours %>%
   ungroup() %>%
@@ -455,6 +461,10 @@ avail_hours$PROV_NAME <- access_raw$PROV_NAME[match(trim(avail_hours$PROV_ID), t
 avail_hours$NPI <- access_raw$NPI[match(trim(avail_hours$PROV_NM_WID), trim(access_raw$PROV_NAME_WID))]
 avail_hours$VISIT_PROV_STAFF_RESOURCE_C <- access_raw$VISIT_PROV_STAFF_RESOURCE_C[match(trim(avail_hours$PROV_NM_WID), trim(access_raw$PROV_NAME_WID))]
 
+```
+
+
+```{r Calculate Scheduled Hours, echo = FALSE, warning = FALSE, message = FALSE}
 
 # Process Scheduled and Arrived Hours ------------------------------------------
 scheduled_hours <- access_raw_filtered %>%
@@ -464,6 +474,10 @@ scheduled_hours <- access_raw_filtered %>%
   summarise(sched_min = sum(APPT_LENGTH)) %>%
   rename(PROV_NM_WID = PROV_NAME_WID)
   
+```
+
+
+```{r Calculate Arrived Hours, echo = FALSE, warning = FALSE, message = FALSE}
 
 ## Process Arrived Hours -------------------------------------------------------
 arrived_hours <- access_raw_filtered %>%
@@ -472,6 +486,10 @@ arrived_hours <- access_raw_filtered %>%
   summarise(arrived_min = sum(APPT_LENGTH)) %>%
   rename(PROV_NM_WID = PROV_NAME_WID)
 
+```
+
+
+```{r Calculate Unavailable Hours, echo = FALSE, warning = FALSE, message = FALSE}
 
 ## Process Unavailable Hours ---------------------------------------------------
 # Process Unavailable Hours ------------------------------------------------------
@@ -479,7 +497,7 @@ unavail_hours <- availability_raw_tbl %>%
   mutate(Appt.Year = year(SLOT_DATE),
          Appt.Month = month(SLOT_DATE)) %>%
   filter(Appt.Year == 2023) %>%
-  filter(TO_DATE(date_1,"YYYY-MM-DD HH24:MI:SS") > TO_DATE(SLOT_DATE)) %>%
+  filter(Appt.Month > 6) %>%
   filter(!is.na(UNAVAILABLE_RSN_C)) %>%
   mutate(Appt.DateYear = TO_DATE(SLOT_DATE)) %>%
   group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear, SLOT_BEGIN_TIME, SLOT_LENGTH, UNAVAILABLE_RSN_NAME) %>%
@@ -489,6 +507,10 @@ unavail_hours <- availability_raw_tbl %>%
   # summarise(avail_min = sum(SLOT_LENGTH)) %>%
   collect()
 
+```
+
+
+```{r Calculate On Hold Hours, echo = FALSE, warning = FALSE, message = FALSE}
 
 ## Process Held Hours ---------------------------------------------------
 # Process Held Hours ------------------------------------------------------
@@ -496,7 +518,7 @@ held_hours <- availability_raw_tbl %>%
   mutate(Appt.Year = year(SLOT_DATE),
          Appt.Month = month(SLOT_DATE)) %>%
   filter(Appt.Year == 2023) %>%
-  filter(TO_DATE(date_1,"YYYY-MM-DD HH24:MI:SS") > TO_DATE(SLOT_DATE)) %>%
+  filter(Appt.Month > 6) %>%
   filter(is.na(UNAVAILABLE_RSN_C)) %>%
   filter(TIME_HELD_YN == "Y") %>%
   mutate(Appt.DateYear = TO_DATE(SLOT_DATE)) %>%
@@ -513,11 +535,10 @@ held_hours <- held_hours %>%
   group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear) %>%
   summarise(held_min = sum(SLOT_LENGTH)) 
 
-# held_hours <- held_hours %>%
-#   pivot_wider(names_from = TIME_HELD_RSN_NAME,
-#               values_from = held_min,
-#               values_fill = 0)
+```
 
+
+```{r Calculate Private Hours, echo = FALSE, warning = FALSE, message = FALSE}
 
 ## Process Private Hours ---------------------------------------------------
 # Process Private Hours ------------------------------------------------------
@@ -525,7 +546,7 @@ private_hours <- availability_raw_tbl %>%
   mutate(Appt.Year = year(SLOT_DATE),
          Appt.Month = month(SLOT_DATE)) %>%
   filter(Appt.Year == 2023) %>%
-  filter(TO_DATE(date_1,"YYYY-MM-DD HH24:MI:SS") > TO_DATE(SLOT_DATE)) %>%
+  filter(Appt.Month > 6) %>%
   filter(is.na(UNAVAILABLE_RSN_C)) %>%
   filter(PRIVATE_YN == "Y") %>%
   mutate(Appt.DateYear = TO_DATE(SLOT_DATE)) %>%
@@ -542,13 +563,17 @@ private_hours <- private_hours %>%
   group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear) %>%
   summarise(private_min = sum(SLOT_LENGTH)) 
 
+```
+
+
+```{r Calculate Overbook Hours, echo = FALSE, warning = FALSE, message = FALSE}
 
 ## Process Overbook Hours -----------------------------------------------------------
 overbook_hours <- availability_raw_tbl %>%
   mutate(Appt.Year = year(SLOT_DATE),
          Appt.Month = month(SLOT_DATE)) %>%
   filter(Appt.Year == 2023) %>%
-  filter(TO_DATE(date_1,"YYYY-MM-DD HH24:MI:SS") > TO_DATE(SLOT_DATE)) %>%
+  filter(Appt.Month > 6) %>%
   filter(is.na(UNAVAILABLE_RSN_C)) %>%
   filter(ORG_OVBK_OPENINGS > 0) %>%
   mutate(Appt.DateYear = TO_DATE(SLOT_DATE)) %>%
@@ -564,7 +589,6 @@ overbook_hours <- overbook_hours %>%
   mutate(Appt.DateYear = as.Date(Appt.DateYear, "%Y-%m-%d")) %>%
   group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear) %>%
   summarise(overbook_min = sum(SLOT_LENGTH)) 
-
 ```
 
 
