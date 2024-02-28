@@ -467,7 +467,7 @@ avail_hours$VISIT_PROV_STAFF_RESOURCE_C <- access_raw$VISIT_PROV_STAFF_RESOURCE_
 
 # Process Scheduled and Arrived Hours ------------------------------------------
 scheduled_hours <- access_raw_filtered %>%
-  filter(Appt.Status %in% c("Arrived", "No Show", "SAmeDay Rescheduled", "SameDay Canceled", "SameDay Bumped")) %>%
+  filter(Appt.Status %in% c("Arrived", "No Show", "SameDay Rescheduled", "SameDay Canceled", "SameDay Bumped")) %>%
   ungroup() %>%
   group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NAME_WID, Appt.DateYear) %>%
   summarise(sched_min = sum(APPT_LENGTH)) %>%
