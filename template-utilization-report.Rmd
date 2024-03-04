@@ -453,14 +453,14 @@ ________________________________________________________________________________
 
 # htmltools::browsable(
 #   tagList(
-#     div(tags$label("Group by", `for` = "cars-grouping-select")),
+#     div(tags$label("Group by", `for` = "template-util-select")),
 #     tags$select(
-#       id = "cars-grouping-select",
-#       onchange = "Reactable.setGroupBy('cars-grouping-table', this.value ? [this.value] : [])",
-#       tags$option("None", value = c("Campus","Campus.Specialty.Group")),
+#       id = "template-util-select",
+#       onchange = "Reactable.setGroupBy('template-util-table', this.value ? [this.value] : [])",
+#       tags$option("None", value = c("MSHS","CAMPUS","DEPT_SPECIALTY_NAME","DEPARTMENT","PROVIDER","SLOT_MONTH_YEAR")),
 #       # tags$option("Test", value = c("Appt.Source.New","Campus.Specialty.Group")),
 #       # lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option)
-#       lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option)
+#       lapply(c("MSHS","CAMPUS","DEPT_SPECIALTY_NAME","DEPARTMENT","PROVIDER","SLOT_MONTH_YEAR"), tags$option)
 #     ),
 # 
 #     tags$hr("aria-hidden" = "true"),
@@ -469,7 +469,7 @@ reactable(
   slot_util_summary %>%
     mutate(MSHS = "MSHS Total"),
   
-  elementId = "util-download-table",
+  elementId = "template-util-table",
   # elementId = "cars-grouping-table",
   style = list(fontFamily = 'Calibri',
                  fontSize = '14px'),
