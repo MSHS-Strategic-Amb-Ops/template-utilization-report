@@ -493,7 +493,7 @@ reactable(
   #           }
   #         },
 
-  groupBy = c("MSHS", "CAMPUS", "DEPT_SPECIALTY_NAME", "DEPARTMENT", "PROVIDER", "SLOT_MONTH_YEAR"),
+  groupBy = c("MSHS", "CAMPUS", "DEPT_SPECIALTY_NAME", "DEPARTMENT", "PROVIDER"),
 
   columnGroups = list(
     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " Visit Volume"), 
