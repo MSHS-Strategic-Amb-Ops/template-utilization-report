@@ -460,7 +460,7 @@ htmltools::browsable(
       tags$option("None", value = c("CAMPUS","DEPT_SPECIALTY_NAME","DEPARTMENT","PROVIDER")),
       # tags$option("Test", value = c("Appt.Source.New","Campus.Specialty.Group")),
       # lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option)
-      lapply(c("CAMPUS","DEPT_SPECIALTY_NAME","DEPARTMENT","PROVIDER"), tags$option)
+      lapply(c("Site","Specialty","Department","Provider"), tags$option)
     ),
 
     tags$hr("aria-hidden" = "true"),
@@ -468,7 +468,8 @@ htmltools::browsable(
 reactable(
   slot_util_summary %>%
     filter(CAMPUS %!in% c("MSH- AMBULATORY CARE", "NYEE")) %>%
-    mutate(MSHS = "MSHS Total"),
+    mutate(MSHS = "MSHS Total") %>%
+    arrange(CAMPUS, DEPT_SPECIALTY_NAME, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR),
   
   elementId = "template-util-table",
   # elementId = "cars-grouping-table",
@@ -481,7 +482,7 @@ reactable(
     highlight = TRUE,
     # filterable = TRUE,
     pagination = FALSE,
-    height = 1000,
+    height = 800,
     wrap = TRUE,
   searchable = TRUE,
   
