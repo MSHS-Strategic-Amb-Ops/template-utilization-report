@@ -325,8 +325,11 @@ not_all_na <- function(x) all(!is.na(x)) # Exclude columns with All NAs
 
 report_run_date <- Sys.Date()
 
-start_date <- as.Date("2023-01-01") 
-end_date <- as.Date("2023-12-31")
+start_date <- format(as.Date("2023-01-01"), "%Y-%m-%d")
+end_date <- format(as.Date(Sys.Date()-1), "%Y-%m-%d") 
+
+# start_date <- paste0(format(as.Date("2023-01-2023"), "%Y-%m-%d"), " 00:00:00") 
+# end_date <- paste0(format(as.Date(Sys.Date()-1), "%Y-%m-%d"), " 00:00:00") 
 
 
 date_1 <- paste0(format(as.Date(Sys.Date())+1, "%Y-%m-%d"), " 00:00:00")
@@ -353,384 +356,65 @@ block_name_tbl <- tbl(conn2, "ZC_APPT_BLOCK")
 orders_raw_tbl <- tbl(conn2, "ORDER_PROC")
 coverage_tbl <- tbl(conn2, "V_PAT_ENC_COVERAGE")
 
-```
-
-
-```{r Department Mapping, echo = FALSE, warning = FALSE, message = FALSE}
-
-# Department and Provider Mapping ----------------------------------------------
-# dept_mapping <- access_raw_tbl %>%
-#   group_by(SITE, DEPT_SPECIALTY_NAME, DEPARTMENT_ID, DEPARTMENT_NAME) %>%
-#   summarise(total = n()) %>%
-#   collect() %>%
-#   dplyr::select(-total)
+slot_view_tbl <- tbl(conn1, in_schema("OAO_PRODUCTION", "AMBULATORY_SLOT_TABLE_VIEW"))
 
 ```
 
 
-```{r Import Access Data, echo = FALSE, warning = FALSE, message = FALSE}
+```{r Slot Data Processing,  echo = FALSE, warning = FALSE, message = FALSE}
 
-access_raw <- access_raw_tbl %>%
-  mutate(Appt.Year = year(CONTACT_DATE),
-         Appt.Month = month(CONTACT_DATE)) %>%
-  filter(Appt.Year == 2023) %>%
-  filter(Appt.Month > 6) %>%
-  mutate(Appt.DateYear = TO_DATE(CONTACT_DATE),
-         Appt.Canceled.DateYear = TO_DATE(APPT_CANC_DATE)) %>%
-  filter(TO_DATE(date_1,"YYYY-MM-DD HH24:MI:SS") > Appt.DateYear) %>%
-  dplyr::select(PAT_ENC_CSN_ID, MRN, DEPARTMENT_NAME, DEPARTMENT_ID, DEPT_SPECIALTY_NAME, SITE, PROV_NAME_WID, PROV_ID, NPI, PRC_NAME, 
-                APPT_LENGTH, APPT_DTTM, APPT_MADE_DTTM, APPT_CANC_DTTM, DERIVED_STATUS_DESC, VISIT_PROV_STAFF_RESOURCE_C, VISIT_GROUP_NUM, VISIT_METHOD, LOS_NAME, OVERBOOKED_YN, OVERRIDE_YN,
-                Appt.Year, Appt.Month, Appt.DateYear, Appt.Canceled.DateYear) %>%
-  mutate(sameDay_canceled = ifelse(Appt.DateYear == Appt.Canceled.DateYear, "Yes", "No")) %>%
-  mutate(Appt.Status = case_when(sameDay_canceled == "Yes" & DERIVED_STATUS_DESC %in% c("Canceled","Rescheduled","Bumped") ~ paste0("SameDay ",DERIVED_STATUS_DESC),
-                                 TRUE ~ DERIVED_STATUS_DESC)) %>%
-  collect() %>%
-  mutate(PROV_NAME = trimws(gsub("\\[.*?\\]", "", PROV_NAME_WID))) 
-
-dept_mapping <- access_raw %>%
-  group_by(SITE, DEPT_SPECIALTY_NAME, DEPARTMENT_ID, DEPARTMENT_NAME) %>%
-  summarise(total = n()) %>%
-  collect() %>%
-  dplyr::select(-total)
-
-```
-
-
-
-```{r Import Availability Data, echo = FALSE, warning = FALSE, message = FALSE}
-
-# Process Available Hours ------------------------------------------------------
-avail_hours <- availability_raw_tbl %>%
-  mutate(Appt.Year = year(SLOT_DATE),
-         Appt.Month = month(SLOT_DATE)) %>%
-  filter(Appt.Year == 2023) %>%
-  filter(Appt.Month > 6) %>%
-  # filter(ORG_OVBK_OPENINGS == 0) %>%
-  filter(is.na(UNAVAILABLE_RSN_C)) %>%
-  mutate(Appt.DateYear = TO_DATE(SLOT_DATE)) %>%
-  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear, SLOT_BEGIN_TIME, SLOT_LENGTH) %>%
-  summarise(avail_min = n()) %>%
-  # ungroup() %>%
-  # group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear) %>%
-  # summarise(avail_min = sum(SLOT_LENGTH)) %>%
+slot_util_month <- slot_view_tbl %>%
+  filter(VISIT_PROV_STAFF_RESOURCE_C == 1) %>%
+  mutate(slot_year = year(SLOT_DATE)) %>%
+  filter(SLOT_DATE >= TO_DATE(start_date, "YYYY-MM-DD HH24:MI:SS")) %>%
+  filter(SLOT_DATE <= TO_DATE(end_date, "YYYY-MM-DD HH24:MI:SS")) %>%
+  group_by(CAMPUS, DEPT_SPECIALTY_NAME, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR, APPT_WEEK) %>%
+  summarise(avail_hours = sum(AVAILABLE_HOURS),
+            sched_hours = sum(SCHEDULED_HOURS),
+            arrived_hours = sum(ARRIVED_HOURS)) %>%
+  group_by(CAMPUS, DEPT_SPECIALTY_NAME, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR) %>%
+  summarise(avail_hours = sum(avail_hours),
+            avail_hours_week = mean(avail_hours),
+            sched_hours = sum(sched_hours),
+            arrived_hours = sum(arrived_hours)) %>%
+  mutate(sched_util = sched_hours/avail_hours,
+         prov_util = arrived_hours/avail_hours) %>%
   collect()
 
 
-# Filter Scheduling Activitites Applicable to Open Slots Only ------------------
-## Excludes cancellations, rescheduling occurred on unavailable slots (erroroneous)
-avail_hours <- avail_hours %>%
-  mutate(relevant_slot = "Yes")
-
-access_raw_filtered <- left_join(access_raw, avail_hours[,c("DEPARTMENT_ID","PROV_ID", "SLOT_BEGIN_TIME", "relevant_slot")], 
-                                 by = c("DEPARTMENT_ID" = "DEPARTMENT_ID",
-                                        "PROV_ID" = "PROV_ID",
-                                        "APPT_DTTM" = "SLOT_BEGIN_TIME"))
-
-
-## Filter out latest appt status per relevant slot (regular and overbook slots treated separately)
-access_raw_filtered <- access_raw_filtered %>%
-  filter(relevant_slot == "Yes") %>%
-  arrange(DEPARTMENT_ID, PROV_NAME_WID, APPT_DTTM, desc(APPT_MADE_DTTM)) %>%
-  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NAME_WID, APPT_DTTM, Appt.DateYear, OVERBOOKED_YN) %>%
-  mutate(id = row_number()) %>%
-  filter(id == 1) 
-access_raw_filtered <- access_raw_filtered %>%
-  mutate(Appt.DateYear = as.Date(APPT_DTTM),
-         Appt.Canceled.DateYear = as.Date(APPT_CANC_DTTM)) %>%
-  mutate(sameDay_canceled = ifelse(Appt.DateYear == Appt.Canceled.DateYear, "Yes", "No")) %>%
-  mutate(Appt.Status = case_when(sameDay_canceled == "Yes" & DERIVED_STATUS_DESC %in% c("Canceled","Rescheduled","Bumped") ~ paste0("SameDay ",DERIVED_STATUS_DESC),
-                                 TRUE ~ DERIVED_STATUS_DESC))
-
-```
-
-
-```{r Calculate Available Hours, echo = FALSE, warning = FALSE, message = FALSE}
-
-# Continue Process Available Hours ----------------------------------------------
-avail_hours <- avail_hours %>%
-  ungroup() %>%
-  mutate(Appt.DateYear = as.Date(Appt.DateYear, "%Y-%m-%d")) %>%
-  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear) %>%
-  summarise(avail_min = sum(SLOT_LENGTH)) 
-
-
-avail_hours$SITE <- dept_mapping$SITE[match(trim(avail_hours$DEPARTMENT_ID), trim(dept_mapping$DEPARTMENT_ID))]
-avail_hours$DEPT_SPECIALTY_NAME <- dept_mapping$DEPT_SPECIALTY_NAME[match(trim(avail_hours$DEPARTMENT_NAME), trim(dept_mapping$DEPARTMENT_NAME))]
-avail_hours$PROV_NAME <- access_raw$PROV_NAME[match(trim(avail_hours$PROV_ID), trim(access_raw$PROV_ID))]
-avail_hours$NPI <- access_raw$NPI[match(trim(avail_hours$PROV_NM_WID), trim(access_raw$PROV_NAME_WID))]
-avail_hours$VISIT_PROV_STAFF_RESOURCE_C <- access_raw$VISIT_PROV_STAFF_RESOURCE_C[match(trim(avail_hours$PROV_NM_WID), trim(access_raw$PROV_NAME_WID))]
-
-```
-
-
-```{r Calculate Scheduled Hours, echo = FALSE, warning = FALSE, message = FALSE}
-
-# Process Scheduled and Arrived Hours ------------------------------------------
-scheduled_hours <- access_raw_filtered %>%
-  filter(Appt.Status %in% c("Arrived", "No Show", "SAmeDay Rescheduled", "SameDay Canceled", "SameDay Bumped")) %>%
-  ungroup() %>%
-  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NAME_WID, Appt.DateYear) %>%
-  summarise(sched_min = sum(APPT_LENGTH)) %>%
-  rename(PROV_NM_WID = PROV_NAME_WID)
-  
-```
-
-
-```{r Calculate Arrived Hours, echo = FALSE, warning = FALSE, message = FALSE}
-
-## Process Arrived Hours -------------------------------------------------------
-arrived_hours <- access_raw_filtered %>%
-  filter(DERIVED_STATUS_DESC == "Arrived") %>%
-  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NAME_WID, Appt.DateYear) %>%
-  summarise(arrived_min = sum(APPT_LENGTH)) %>%
-  rename(PROV_NM_WID = PROV_NAME_WID)
-
-```
-
-
-```{r Calculate Unavailable Hours, echo = FALSE, warning = FALSE, message = FALSE}
-
-## Process Unavailable Hours ---------------------------------------------------
-# Process Unavailable Hours ------------------------------------------------------
-unavail_hours <- availability_raw_tbl %>%
-  mutate(Appt.Year = year(SLOT_DATE),
-         Appt.Month = month(SLOT_DATE)) %>%
-  filter(Appt.Year == 2023) %>%
-  filter(Appt.Month > 6) %>%
-  filter(!is.na(UNAVAILABLE_RSN_C)) %>%
-  mutate(Appt.DateYear = TO_DATE(SLOT_DATE)) %>%
-  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear, SLOT_BEGIN_TIME, SLOT_LENGTH, UNAVAILABLE_RSN_NAME) %>%
-  summarise(avail_min = n()) %>%
-  # ungroup() %>%
-  # group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear) %>%
-  # summarise(avail_min = sum(SLOT_LENGTH)) %>%
+slot_util_day <- slot_view_tbl %>%
+  filter(VISIT_PROV_STAFF_RESOURCE_C == 1) %>%
+  mutate(slot_year = year(SLOT_DATE)) %>%
+  filter(SLOT_DATE >= TO_DATE(start_date, "YYYY-MM-DD HH24:MI:SS")) %>%
+  filter(SLOT_DATE <= TO_DATE(end_date, "YYYY-MM-DD HH24:MI:SS")) %>%
+  group_by(CAMPUS, DEPT_SPECIALTY_NAME, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR, APPT_DAY) %>%
+  summarise(avail_hours_day = sum(AVAILABLE_HOURS),
+            sched_hours_day = sum(SCHEDULED_HOURS),
+            arrived_hours_day = sum(ARRIVED_HOURS),
+            sched_util_day = sum(SCHEDULED_HOURS)/sum(AVAILABLE_HOURS),
+            prov_util_day = sum(ARRIVED_HOURS)/sum(SCHEDULED_HOURS)) %>%
+  pivot_wider(names_from = APPT_DAY,
+              values_from = avail_hours_day:prov_util_day) %>%
   collect()
-
-```
-
-
-```{r Calculate On Hold Hours, echo = FALSE, warning = FALSE, message = FALSE}
-
-## Process Held Hours ---------------------------------------------------
-# Process Held Hours ------------------------------------------------------
-held_hours <- availability_raw_tbl %>%
-  mutate(Appt.Year = year(SLOT_DATE),
-         Appt.Month = month(SLOT_DATE)) %>%
-  filter(Appt.Year == 2023) %>%
-  filter(Appt.Month > 6) %>%
-  filter(is.na(UNAVAILABLE_RSN_C)) %>%
-  filter(TIME_HELD_YN == "Y") %>%
-  mutate(Appt.DateYear = TO_DATE(SLOT_DATE)) %>%
-  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear, SLOT_BEGIN_TIME, SLOT_LENGTH) %>%
-  summarise(avail_min = n()) %>%
-  # ungroup() %>%
-  # group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear) %>%
-  # summarise(avail_min = sum(SLOT_LENGTH)) %>%
-  collect()
-
-held_hours <- held_hours %>%
-  ungroup() %>%
-  mutate(Appt.DateYear = as.Date(Appt.DateYear, "%Y-%m-%d")) %>%
-  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear) %>%
-  summarise(held_min = sum(SLOT_LENGTH)) 
-
-```
-
-
-```{r Calculate Private Hours, echo = FALSE, warning = FALSE, message = FALSE}
-
-## Process Private Hours ---------------------------------------------------
-# Process Private Hours ------------------------------------------------------
-private_hours <- availability_raw_tbl %>%
-  mutate(Appt.Year = year(SLOT_DATE),
-         Appt.Month = month(SLOT_DATE)) %>%
-  filter(Appt.Year == 2023) %>%
-  filter(Appt.Month > 6) %>%
-  filter(is.na(UNAVAILABLE_RSN_C)) %>%
-  filter(PRIVATE_YN == "Y") %>%
-  mutate(Appt.DateYear = TO_DATE(SLOT_DATE)) %>%
-  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear, SLOT_BEGIN_TIME, SLOT_LENGTH) %>%
-  summarise(avail_min = n()) %>%
-  # ungroup() %>%
-  # group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear) %>%
-  # summarise(avail_min = sum(SLOT_LENGTH)) %>%
-  collect()
-
-private_hours <- private_hours %>%
-  ungroup() %>%
-  mutate(Appt.DateYear = as.Date(Appt.DateYear, "%Y-%m-%d")) %>%
-  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear) %>%
-  summarise(private_min = sum(SLOT_LENGTH)) 
-
-```
-
-
-```{r Calculate Overbook Hours, echo = FALSE, warning = FALSE, message = FALSE}
-
-## Process Overbook Hours -----------------------------------------------------------
-overbook_hours <- availability_raw_tbl %>%
-  mutate(Appt.Year = year(SLOT_DATE),
-         Appt.Month = month(SLOT_DATE)) %>%
-  filter(Appt.Year == 2023) %>%
-  filter(Appt.Month > 6) %>%
-  filter(is.na(UNAVAILABLE_RSN_C)) %>%
-  filter(ORG_OVBK_OPENINGS > 0) %>%
-  mutate(Appt.DateYear = TO_DATE(SLOT_DATE)) %>%
-  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear, SLOT_BEGIN_TIME, SLOT_LENGTH) %>%
-  summarise(avail_min = n()) %>%
-  # ungroup() %>%
-  # group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear) %>%
-  # summarise(avail_min = sum(SLOT_LENGTH)) %>%
-  collect()
-
-overbook_hours <- overbook_hours %>%
-  ungroup() %>%
-  mutate(Appt.DateYear = as.Date(Appt.DateYear, "%Y-%m-%d")) %>%
-  group_by(DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NM_WID, PROV_ID, Appt.Year, Appt.Month, Appt.DateYear) %>%
-  summarise(overbook_min = sum(SLOT_LENGTH)) 
-```
-
-
-```{r Merge Processed Hours, echo = FALSE, warning = FALSE, message = FALSE}
-
-# Merge Processed Hours --------------------------------------------------------
-hours_merged <- left_join(avail_hours, scheduled_hours)
-hours_merged <- left_join(hours_merged, arrived_hours)
-hours_merged <- left_join(hours_merged, held_hours)
-hours_merged <- left_join(hours_merged, private_hours)
-
-
-hours_merged$avail_min[is.na(hours_merged$avail_min)] <- 0
-hours_merged$sched_min[is.na(hours_merged$sched_min)] <- 0 
-hours_merged$arrived_min[is.na(hours_merged$arrived_min)] <- 0 
-hours_merged$held_min[is.na(hours_merged$held_min)] <- 0 
-hours_merged$private_min[is.na(hours_merged$private_min)] <- 0 
-
-
-# Process Provider Name --------------------------------------------------------
-hours_merged <- hours_merged %>%
-  mutate(PROV_NAME = trimws(gsub("\\[.*?\\]", "", PROV_NM_WID)))
-
-
-hours_merged <- hours_merged %>%
-  group_by(DEPARTMENT_NAME, PROV_ID) %>%
-  mutate(empty_template = ifelse(sum(sched_min) == 0 & sum(arrived_min) == 0, "Yes", "No"))
-
-
-```
-
-
-```{r Process Utiliaztion, echo = FALSE, warning = FALSE, message = FALSE}
-
-# Process Utilization ----------------------------------------------------------
-## Utilization by Day ----------------------------------------------------------
-hours_merged_day <- hours_merged %>%
-  filter(empty_template == "No") %>%
-  mutate(Appt.MonthYear = format(Appt.DateYear, "%m-%Y"),
-         Appt.Day = format(Appt.DateYear, "%a")) %>%
-  # mutate(arrived_hours = ifelse((!is.na(avail_hours) & !is.na(sched_hours) & is.na(arrived_hours)), 0, arrived_hours)) %>%
-  group_by(SITE, DEPT_SPECIALTY_NAME, DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NAME, NPI, VISIT_PROV_STAFF_RESOURCE_C, Appt.Year, Appt.Month, Appt.MonthYear, Appt.Day) %>%
-  summarise(avg_avail_min = round(mean(avail_min, na.rm = T)),
-            avg_sched_min = round(mean(sched_min, na.rm = T)),
-            avg_arrived_min = round(mean(arrived_min, na.rm = T)),
-            avg_held_min = round(mean(held_min, na.rm = T)),
-            avg_private_min = round(mean(private_min, na.rm = T))) %>%
-  mutate(avg_held_perc = round(avg_held_min/avg_avail_min,2),
-         avg_private_perc = round(avg_private_min/avg_avail_min,2),
-         avg_schedule_util = round(avg_sched_min/avg_avail_min,2),
-         avg_provider_util = round(avg_arrived_min/avg_avail_min,2)) 
-
-
-## Utilization by Month --------------------------------------------------------
-hours_merged_month <- hours_merged %>%
-  filter(empty_template == "No") %>%
-  mutate(Appt.MonthYear = format(Appt.DateYear, "%m-%Y")) %>%
-  group_by(SITE, DEPT_SPECIALTY_NAME, DEPARTMENT_NAME, DEPARTMENT_ID, PROV_NAME, NPI, VISIT_PROV_STAFF_RESOURCE_C, Appt.Year, Appt.Month, Appt.MonthYear) %>%
-  summarise(avail_min = round(sum(avail_min, na.rm = T)),
-            sched_min = round(sum(sched_min, na.rm = T)),
-            arrived_min = round(sum(arrived_min, na.rm = T)),
-            held_min = round(sum(held_min, na.rm = T)),
-            private_min = round(sum(private_min, na.rm = T))) %>%
-  ungroup() %>%
-  mutate(avail_hours = round(avail_min/60,1),
-         sched_hours = round(sched_min/60,1),
-         arrived_hours = round(arrived_min/60,1),
-         held_hours = round(held_min/60,1),
-         private_hours = round(private_min/60,1),
-         held_perc = round(held_min/avail_min,2),
-         private_perc = round(private_min/avail_min,2),
-         schedule_util = round(sched_min/avail_min,2),
-         provider_util = round(arrived_min/avail_min,2)) 
+  
   
 
-```
+slot_util_summary <- left_join(slot_util_month, slot_util_day)
 
-
-```{r Utilization by Month and Day Output Processing, echo = FALSE, warning = FALSE, message = FALSE}
-
-hours_merged_day_output <- hours_merged_day %>%
-  pivot_wider(names_from = Appt.Day,
-              values_from = 12:20)
-  
-
-utilization_output <- left_join(hours_merged_month, hours_merged_day_output) 
-utilization_output <- utilization_output %>%
-  mutate(avail_hours_week = round(avail_hours/4,1),
-         sched_hours_week = round(sched_hours/4,1),
-         arrived_hours_week = round(arrived_hours/4,1),
-         held_hours_week = round(held_hours/4,1),
-         private_hours_week = round(private_hours/4,1)) %>%
-  mutate(held_perc = round(held_min/avail_min,2),
-         private_perc = round(private_min/avail_min,2))
-
-
-col_order <- c("SITE", "DEPT_SPECIALTY_NAME", "DEPARTMENT_NAME", "DEPARTMENT_ID", "PROV_NAME", "NPI", "VISIT_PROV_STAFF_RESOURCE_C", "Appt.MonthYear", 
-               "avail_min", "sched_min", "arrived_min", "held_min", "private_min",
-               "avail_hours", "sched_hours", "arrived_hours", "held_hours", "private_hours", 
-               "avail_hours_week", "sched_hours_week", "arrived_hours_week", "held_hours_week", "private_hours_week",
-               "held_perc", "private_perc", "schedule_util", "provider_util", 
-               "avg_avail_min_Mon", "avg_avail_min_Tue", "avg_avail_min_Wed", "avg_avail_min_Thu", "avg_avail_min_Fri", "avg_avail_min_Sat", "avg_avail_min_Sun", 
-               "avg_sched_min_Mon", "avg_sched_min_Tue", "avg_sched_min_Wed", "avg_sched_min_Thu", "avg_sched_min_Fri", "avg_sched_min_Sat", "avg_sched_min_Sun",  
-               "avg_arrived_min_Mon", "avg_arrived_min_Tue", "avg_arrived_min_Wed", "avg_arrived_min_Thu", "avg_arrived_min_Fri", "avg_arrived_min_Sat", "avg_arrived_min_Sun", 
-               "avg_held_min_Mon", "avg_held_min_Tue", "avg_held_min_Wed", "avg_held_min_Thu", "avg_held_min_Fri", "avg_held_min_Sat", "avg_held_min_Sun",
-               "avg_private_min_Mon", "avg_private_min_Tue", "avg_private_min_Wed", "avg_private_min_Thu", "avg_private_min_Fri", "avg_private_min_Sat", "avg_private_min_Sun",
-               "avg_held_perc_Mon", "avg_held_perc_Tue", "avg_held_perc_Wed", "avg_held_perc_Thu", "avg_held_perc_Fri", "avg_held_perc_Sat", "avg_held_perc_Sun",
-               "avg_private_perc_Mon", "avg_private_perc_Tue", "avg_private_perc_Wed", "avg_private_perc_Thu", "avg_private_perc_Fri", "avg_private_perc_Sat", "avg_private_perc_Sun",
-               "avg_schedule_util_Mon", "avg_schedule_util_Tue", "avg_schedule_util_Wed", "avg_schedule_util_Thu", "avg_schedule_util_Fri", "avg_schedule_util_Sat", "avg_schedule_util_Sun",
-               "avg_provider_util_Mon", "avg_provider_util_Tue", "avg_provider_util_Wed", "avg_provider_util_Thu", "avg_provider_util_Fri", "avg_provider_util_Sat", "avg_provider_util_Sun")
-
-
-utilization_output <- utilization_output[col_order]
-
-
-utilization_output_function <- function(site){
-  
-  utilization_output_site <- utilization_output %>%
-    filter(SITE == site) %>%
-    dplyr::select(-SITE) %>%
-    arrange(DEPT_SPECIALTY_NAME, DEPARTMENT_NAME, PROV_NAME)
-  
-  return(utilization_output_site)
-
-}
-
-```
-
-
-```{r Unused Templates Processing, echo=FALSE, out.width = '15%'}
-
-unused_templates <- hours_merged %>%
-  ungroup() %>%
-  dplyr::select(SITE, DEPT_SPECIALTY_NAME, DEPARTMENT_NAME, PROV_NAME, empty_template) %>%
-  distinct() %>%
-  mutate(total = 1) %>%
-  pivot_wider(names_from = empty_template,
-              values_from = total,
-              values_fill = 0) %>%
-  mutate(open_templates = Yes + No,
-         unused_perc = round(Yes/open_templates,2)) %>%
-  rename(Unused = Yes,
-         Used = No)
+slot_util_summary <- slot_util_summary %>%
+  dplyr::select(CAMPUS, DEPT_SPECIALTY_NAME, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR,
+                avail_hours, avail_hours_week, sched_hours, arrived_hours, 
+                sched_util, prov_util,
+                avail_hours_day_MON, avail_hours_day_TUE, avail_hours_day_WED, avail_hours_day_THU, avail_hours_day_FRI,
+                avail_hours_day_SAT,
+                sched_hours_day_MON, sched_hours_day_TUE, sched_hours_day_WED, sched_hours_day_THU, sched_hours_day_FRI,
+                sched_hours_day_SAT,
+                arrived_hours_day_MON, arrived_hours_day_TUE, arrived_hours_day_WED, arrived_hours_day_THU, arrived_hours_day_FRI,
+                arrived_hours_day_SAT,
+                sched_util_day_MON, sched_util_day_TUE, sched_util_day_WED, sched_util_day_THU, sched_util_day_FRI,
+                sched_util_day_SAT,
+                prov_util_day_MON, prov_util_day_TUE, prov_util_day_WED, prov_util_day_THU, prov_util_day_FRI,
+                prov_util_day_SAT)
 
 ```
 
@@ -743,1176 +427,15 @@ knitr::include_graphics("Mount_Sinai_Logo_H.png")
 # Template Utilization Report
 *Report run date: `r report_run_date`*<br/>
 *Excludes Non-Epic Scheduling Sites: MSH-AMBULATORY CARE, NYEE*<br/>
-*Resource vs. Provider defined by Epic (VISIT_PROV_STAFF_RESOURCE_C)*<br/>
+*Includes Providers Only (Defined in EPIC as VISIT_PROV_STAFF_RESOURCE_C = 1)*<br/>
 _________________________________________________________________________________________________________________________________________________________
 <br/>
 <br/>
 
 
 ## MSHS {.tabset .tabset-fade .tabset-pills}
-<!-- ### All Resources -->
-<!-- #### Template Utilization  -->
-<!-- <span style='font-size: 20px; font-weight:bold; font-style:italic; color: #212070'>*Excludes any templates with no scheduling activities; refer to "Unused Templates" section.</span><br/> -->
-<!-- ```{r Utilization by Month Table Output, echo = FALSE, warning = FALSE, message = FALSE} -->
-
-
-<!-- # Table Output ----------------------------------------------------------------- -->
-<!-- # htmltools::browsable( -->
-<!-- #   tagList( -->
-<!-- #     tags$button( -->
-<!-- #       tagList(fontawesome::fa("download"), "Download Table"), -->
-<!-- #       onclick = "Reactable.downloadDataCSV('util-download-table', 'Template Utilization')" -->
-<!-- #     ), -->
-
-<!-- # htmltools::browsable( -->
-<!-- #   tagList( -->
-<!-- #     div(tags$label("Group by", `for` = "cars-grouping-select")), -->
-<!-- #     tags$select( -->
-<!-- #       id = "cars-grouping-select", -->
-<!-- #       onchange = "Reactable.setGroupBy('cars-grouping-table', this.value ? [this.value] : [])", -->
-<!-- #       tags$option("None", value = c("Campus","Campus.Specialty.Group")), -->
-<!-- #       # tags$option("Test", value = c("Appt.Source.New","Campus.Specialty.Group")), -->
-<!-- #       # lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option) -->
-<!-- #       lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option) -->
-<!-- #     ), -->
-<!-- #  -->
-<!-- #     tags$hr("aria-hidden" = "true"), -->
-
-<!-- reactable( -->
-<!--   utilization_output %>% -->
-<!--     filter(SITE %!in% c("MS NOW", "MSH- AMBULATORY CARE", "OTHER", "NYEE")), -->
-
-<!--   elementId = "util-download-table", -->
-<!--   # elementId = "cars-grouping-table", -->
-<!--   style = list(fontFamily = 'Calibri', -->
-<!--                  fontSize = '14px'), -->
-<!--     defaultColDef = colDef(align = "left", -->
-<!--                            headerStyle = list(fontWeight = "Bold", fontSize = "14px"), -->
-<!--                            headerClass = "bar-sort-header"), -->
-
-<!--     highlight = TRUE, -->
-<!--     # filterable = TRUE, -->
-<!--     pagination = FALSE, -->
-<!--     height = 700, -->
-<!--     wrap = TRUE, -->
-<!--   searchable = TRUE, -->
-
-<!--   # rowStyle = function(index) { -->
-<!--   #           if (index %in% c(10)) { -->
-<!--   #             list(`border-top` = "2px solid rgb(184,184,184)", -->
-<!--   #                  fontWeight = "Bold") -->
-<!--   #           } -->
-<!--   #         }, -->
-
-<!--   groupBy = c("Appt.MonthYear", "SITE", "DEPT_SPECIALTY_NAME", "DEPARTMENT_NAME", "PROV_NAME"), -->
-
-<!--   columnGroups = list( -->
-<!--     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " Visit Volume"),  -->
-<!--     #          columns = c("Total", "new_perc"), -->
-<!--     #          headerStyle = list(color = "#212070", fontSize = "16px")), -->
-<!--     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " No Show Rate"),  -->
-<!--     #          columns = c("noShow_rate", "noShow_rate_Established", "noShow_rate_New"), -->
-<!--     #          headerStyle = list(color = "#d80b8c", fontSize = "16px")) -->
-<!--     colGroup(name = "",  -->
-<!--              columns = c("Appt.MonthYear","SITE","DEPT_SPECIALTY_NAME","DEPARTMENT_NAME","PROV_NAME"), sticky = "left",  -->
-<!--              headerStyle = list(fontSize = "16px")), -->
-<!--     colGroup(name = "Available Hours",  -->
-<!--              columns = c("avail_hours","avail_hours_week"), -->
-<!--              headerStyle = list(color = "#7f7f7f", fontSize = "16px")), -->
-<!--     colGroup(name = "Overall Utilization",  -->
-<!--              columns = c("schedule_util","provider_util"), -->
-<!--              headerStyle = list(color = "#212070", fontSize = "16px")), -->
-<!--     colGroup(name = "Schedule Utiliation by Day",  -->
-<!--              columns = c("avg_schedule_util_Mon", "avg_schedule_util_Tue", "avg_schedule_util_Wed", "avg_schedule_util_Thu", "avg_schedule_util_Fri"), -->
-<!--              headerStyle = list(color = "#d80b8c", fontSize = "16px")), -->
-<!--     colGroup(name = "Provider Utiliation by Day",  -->
-<!--              columns = c("avg_provider_util_Mon", "avg_provider_util_Tue", "avg_provider_util_Wed", "avg_provider_util_Thu", "avg_provider_util_Fri"), -->
-<!--              headerStyle = list(color = "#00aeef", fontSize = "16px")) -->
-<!--     ), -->
-
-<!--   columns = list( -->
-
-<!--     SITE = colDef( -->
-<!--       # footer = "Total", -->
-<!--       name = "Site", -->
-<!--       minWidth = 140), -->
-
-<!--     DEPT_SPECIALTY_NAME = colDef( -->
-<!--       name = "Specialty", -->
-<!--       minWidth = 180), -->
-
-<!--     DEPARTMENT_NAME = colDef( -->
-<!--       name = "Department", -->
-<!--       minWidth = 220), -->
-
-<!--     PROV_NAME = colDef( -->
-<!--       name = "Provider", -->
-<!--       minWidth = 180), -->
-
-<!--     Appt.MonthYear = colDef( -->
-<!--       name = "Month", -->
-<!--       minWidth = 120), -->
-
-<!--     avail_hours = colDef( -->
-<!--       name = "Available Hours", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#7f7f7f", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avail_hours_week = colDef( -->
-<!--       name = "Available Hours per Week", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#7f7f7f", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'mean', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     schedule_util = colDef( -->
-<!--       name = "Schedule Utilization", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavail_min = 0 -->
-<!--         let totalsched_min = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavail_min += row['avail_min'] -->
-<!--           totalsched_min += row['sched_min'] -->
-<!--         }) -->
-<!--         return (totalsched_min) / totalavail_min || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     provider_util = colDef( -->
-<!--       name = "Provider Utilization", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavail_min = 0 -->
-<!--         let totalarrived_min = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavail_min += row['avail_min'] -->
-<!--           totalarrived_min += row['arrived_min'] -->
-<!--         }) -->
-<!--         return (totalarrived_min) / totalavail_min || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_schedule_util_Mon = colDef( -->
-<!--       name = "Mon", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_avail_min_Mon = 0 -->
-<!--         let totalavg_sched_min_Mon = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_avail_min_Mon += row['avg_avail_min_Mon'] -->
-<!--           totalavg_sched_min_Mon += row['avg_sched_min_Mon'] -->
-<!--         }) -->
-<!--         return (totalavg_sched_min_Mon) / totalavg_avail_min_Mon || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_schedule_util_Tue = colDef( -->
-<!--       name = "Tue", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_avail_min_Tue = 0 -->
-<!--         let totalavg_sched_min_Tue = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_avail_min_Tue += row['avg_avail_min_Tue'] -->
-<!--           totalavg_sched_min_Tue += row['avg_sched_min_Tue'] -->
-<!--         }) -->
-<!--         return (totalavg_sched_min_Tue) / totalavg_avail_min_Tue || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_schedule_util_Wed = colDef( -->
-<!--       name = "Wed", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_avail_min_Wed = 0 -->
-<!--         let totalavg_sched_min_Wed = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_avail_min_Wed += row['avg_avail_min_Wed'] -->
-<!--           totalavg_sched_min_Wed += row['avg_sched_min_Wed'] -->
-<!--         }) -->
-<!--         return (totalavg_sched_min_Wed) / totalavg_avail_min_Wed || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_schedule_util_Thu = colDef( -->
-<!--       name = "Thu", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_avail_min_Thu = 0 -->
-<!--         let totalavg_sched_min_Thu = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_avail_min_Thu += row['avg_avail_min_Thu'] -->
-<!--           totalavg_sched_min_Thu += row['avg_sched_min_Thu'] -->
-<!--         }) -->
-<!--         return (totalavg_sched_min_Thu) / totalavg_avail_min_Thu || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_schedule_util_Fri = colDef( -->
-<!--       name = "Fri", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_avail_min_Fri = 0 -->
-<!--         let totalavg_sched_min_Fri = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_avail_min_Fri += row['avg_avail_min_Fri'] -->
-<!--           totalavg_sched_min_Fri += row['avg_sched_min_Fri'] -->
-<!--         }) -->
-<!--         return (totalavg_sched_min_Fri) / totalavg_avail_min_Fri || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_provider_util_Mon = colDef( -->
-<!--       name = "Mon", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_avail_min_Mon = 0 -->
-<!--         let totalavg_arrived_min_Mon = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_avail_min_Mon += row['avg_avail_min_Mon'] -->
-<!--           totalavg_arrived_min_Mon += row['avg_arrived_min_Mon'] -->
-<!--         }) -->
-<!--         return (totalavg_arrived_min_Mon) / totalavg_avail_min_Mon || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_provider_util_Tue = colDef( -->
-<!--       name = "Tue", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_avail_min_Tue = 0 -->
-<!--         let totalavg_arrived_min_Tue = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_avail_min_Tue += row['avg_avail_min_Tue'] -->
-<!--           totalavg_arrived_min_Tue += row['avg_arrived_min_Tue'] -->
-<!--         }) -->
-<!--         return (totalavg_arrived_min_Tue) / totalavg_avail_min_Tue || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_provider_util_Wed = colDef( -->
-<!--       name = "Wed", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_avail_min_Wed = 0 -->
-<!--         let totalavg_arrived_min_Wed = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_avail_min_Wed += row['avg_avail_min_Wed'] -->
-<!--           totalavg_arrived_min_Wed += row['avg_arrived_min_Wed'] -->
-<!--         }) -->
-<!--         return (totalavg_arrived_min_Wed) / totalavg_avail_min_Wed || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_provider_util_Thu = colDef( -->
-<!--       name = "Thu", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_avail_min_Thu = 0 -->
-<!--         let totalavg_arrived_min_Thu = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_avail_min_Thu += row['avg_avail_min_Thu'] -->
-<!--           totalavg_arrived_min_Thu += row['avg_arrived_min_Thu'] -->
-<!--         }) -->
-<!--         return (totalavg_arrived_min_Thu) / totalavg_avail_min_Thu || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_provider_util_Fri = colDef( -->
-<!--       name = "Fri", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_avail_min_Fri = 0 -->
-<!--         let totalavg_arrived_min_Fri = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_avail_min_Fri += row['avg_avail_min_Fri'] -->
-<!--           totalavg_arrived_min_Fri += row['avg_arrived_min_Fri'] -->
-<!--         }) -->
-<!--         return (totalavg_arrived_min_Fri) / totalavg_avail_min_Fri || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     DEPARTMENT_ID = colDef(show =F), -->
-<!--     NPI = colDef(show =F), -->
-<!--     VISIT_PROV_STAFF_RESOURCE_C = colDef(show =F), -->
-<!--     avail_min = colDef(show =F), -->
-<!--     sched_min = colDef(show =F), -->
-<!--     arrived_min = colDef(show =F), -->
-<!--     held_min = colDef(show =F), -->
-<!--     private_min = colDef(show =F), -->
-<!--     sched_hours = colDef(show =F), -->
-<!--     arrived_hours = colDef(show =F), -->
-<!--     held_hours = colDef(show =F), -->
-<!--     private_hours = colDef(show =F), -->
-<!--     held_perc = colDef(show =F), -->
-<!--     private_perc = colDef(show =F), -->
-<!--     sched_hours_week = colDef(show =F), -->
-<!--     arrived_hours_week = colDef(show =F), -->
-<!--     held_hours_week = colDef(show =F), -->
-<!--     private_hours_week = colDef(show =F), -->
-<!--     avg_avail_min_Mon = colDef(show =F), -->
-<!--     avg_avail_min_Tue = colDef(show =F), -->
-<!--     avg_avail_min_Wed = colDef(show =F), -->
-<!--     avg_avail_min_Thu = colDef(show =F), -->
-<!--     avg_avail_min_Fri = colDef(show =F), -->
-<!--     avg_avail_min_Sat = colDef(show =F), -->
-<!--     avg_avail_min_Sun = colDef(show =F), -->
-<!--     avg_sched_min_Mon = colDef(show =F), -->
-<!--     avg_sched_min_Tue = colDef(show =F), -->
-<!--     avg_sched_min_Wed = colDef(show =F), -->
-<!--     avg_sched_min_Thu = colDef(show =F), -->
-<!--     avg_sched_min_Fri = colDef(show =F), -->
-<!--     avg_sched_min_Sat = colDef(show =F), -->
-<!--     avg_sched_min_Sun = colDef(show =F), -->
-<!--     avg_arrived_min_Mon = colDef(show =F), -->
-<!--     avg_arrived_min_Tue = colDef(show =F), -->
-<!--     avg_arrived_min_Wed = colDef(show =F), -->
-<!--     avg_arrived_min_Thu = colDef(show =F), -->
-<!--     avg_arrived_min_Fri = colDef(show =F), -->
-<!--     avg_arrived_min_Sat = colDef(show =F), -->
-<!--     avg_arrived_min_Sun = colDef(show =F), -->
-<!--     avg_held_min_Mon = colDef(show =F), -->
-<!--     avg_held_min_Tue = colDef(show =F), -->
-<!--     avg_held_min_Wed = colDef(show =F), -->
-<!--     avg_held_min_Thu = colDef(show =F), -->
-<!--     avg_held_min_Fri = colDef(show =F), -->
-<!--     avg_held_min_Sat = colDef(show =F), -->
-<!--     avg_held_min_Sun = colDef(show =F), -->
-<!--     avg_private_min_Mon = colDef(show =F), -->
-<!--     avg_private_min_Tue = colDef(show =F), -->
-<!--     avg_private_min_Wed = colDef(show =F), -->
-<!--     avg_private_min_Thu = colDef(show =F), -->
-<!--     avg_private_min_Fri = colDef(show =F), -->
-<!--     avg_private_min_Sat = colDef(show =F), -->
-<!--     avg_private_min_Sun = colDef(show =F), -->
-<!--     avg_held_perc_Mon = colDef(show =F), -->
-<!--     avg_held_perc_Tue = colDef(show =F), -->
-<!--     avg_held_perc_Wed = colDef(show =F), -->
-<!--     avg_held_perc_Thu = colDef(show =F), -->
-<!--     avg_held_perc_Fri = colDef(show =F), -->
-<!--     avg_held_perc_Sat = colDef(show =F), -->
-<!--     avg_held_perc_Sun = colDef(show =F), -->
-<!--     avg_private_perc_Mon = colDef(show =F), -->
-<!--     avg_private_perc_Tue = colDef(show =F), -->
-<!--     avg_private_perc_Wed = colDef(show =F), -->
-<!--     avg_private_perc_Thu = colDef(show =F), -->
-<!--     avg_private_perc_Fri = colDef(show =F), -->
-<!--     avg_private_perc_Sat = colDef(show =F), -->
-<!--     avg_private_perc_Sun = colDef(show =F), -->
-<!--     avg_schedule_util_Sat = colDef(show =F), -->
-<!--     avg_schedule_util_Sun = colDef(show =F), -->
-<!--     avg_provider_util_Sat = colDef(show =F), -->
-<!--     avg_provider_util_Sun = colDef(show =F) -->
-
-<!--   ) # Close Columns -->
-
-<!--   ) # Close Reactable -->
-
-<!-- #  ) # Close tagList -->
-<!-- # ) # Close htmltools -->
-
-
-<!-- ``` -->
-<!-- <br/> -->
-<!-- <br/> -->
-<!-- <br/> -->
-
-
-<!-- #### Template Capacity -->
-<!-- <span style='font-size: 20px; font-weight:bold; font-style:italic; color: #212070'>*Excludes any templates with no scheduling activities; refer to "Unused Templates" section.</span><br/> -->
-<!-- ```{r Template Capacity by Month Table Output, echo = FALSE, warning = FALSE, message = FALSE} -->
-
-
-<!-- # Table Output ----------------------------------------------------------------- -->
-<!-- # htmltools::browsable( -->
-<!-- #   tagList( -->
-<!-- #     tags$button( -->
-<!-- #       tagList(fontawesome::fa("download"), "Download Table"), -->
-<!-- #       onclick = "Reactable.downloadDataCSV('capacity-download-table', 'Template Utilization')" -->
-<!-- #     ), -->
-
-<!-- # htmltools::browsable( -->
-<!-- #   tagList( -->
-<!-- #     div(tags$label("Group by", `for` = "cars-grouping-select")), -->
-<!-- #     tags$select( -->
-<!-- #       id = "cars-grouping-select", -->
-<!-- #       onchange = "Reactable.setGroupBy('cars-grouping-table', this.value ? [this.value] : [])", -->
-<!-- #       tags$option("None", value = c("Campus","Campus.Specialty.Group")), -->
-<!-- #       # tags$option("Test", value = c("Appt.Source.New","Campus.Specialty.Group")), -->
-<!-- #       # lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option) -->
-<!-- #       lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option) -->
-<!-- #     ), -->
-<!-- # -->
-<!-- #     tags$hr("aria-hidden" = "true"), -->
-
-<!-- reactable( -->
-<!--   utilization_output %>% -->
-<!--     filter(SITE %!in% c("MS NOW", "MSH- AMBULATORY CARE", "OTHER", "NYEE")), -->
-
-<!--   # elementId = "capacity-download-table", -->
-<!--   # elementId = "cars-grouping-table", -->
-<!--   style = list(fontFamily = 'Calibri', -->
-<!--                  fontSize = '14px'), -->
-<!--     defaultColDef = colDef(align = "left", -->
-<!--                            headerStyle = list(fontWeight = "Bold", fontSize = "14px"), -->
-<!--                            headerClass = "bar-sort-header"), -->
-
-<!--     highlight = TRUE, -->
-<!--     # filterable = TRUE, -->
-<!--     pagination = FALSE, -->
-<!--     height = 700, -->
-<!--     wrap = TRUE, -->
-<!--   searchable = TRUE, -->
-
-<!--   # rowStyle = function(index) { -->
-<!--   #           if (index %in% c(10)) { -->
-<!--   #             list(`border-top` = "2px solid rgb(184,184,184)", -->
-<!--   #                  fontWeight = "Bold") -->
-<!--   #           } -->
-<!--   #         }, -->
-
-<!--   groupBy = c("SITE", "DEPT_SPECIALTY_NAME", "DEPARTMENT_NAME", "PROV_NAME"), -->
-
-<!--   columnGroups = list( -->
-<!--     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " Visit Volume"), -->
-<!--     #          columns = c("Total", "new_perc"), -->
-<!--     #          headerStyle = list(color = "#212070", fontSize = "16px")), -->
-<!--     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " No Show Rate"), -->
-<!--     #          columns = c("noShow_rate", "noShow_rate_Established", "noShow_rate_New"), -->
-<!--     #          headerStyle = list(color = "#d80b8c", fontSize = "16px")) -->
-<!--     colGroup(name = "", -->
-<!--              columns = c("SITE","DEPT_SPECIALTY_NAME","DEPARTMENT_NAME","PROV_NAME","Appt.MonthYear"), sticky = "left", -->
-<!--              headerStyle = list(fontSize = "16px")), -->
-<!--     colGroup(name = "Available Hours", -->
-<!--              columns = c("avail_hours_week", "sched_hours_week", "arrived_hours_week"), -->
-<!--              headerStyle = list(color = "#7f7f7f", fontSize = "16px")), -->
-<!--     colGroup(name = "Available Minutes by Day", -->
-<!--              columns = c("avg_avail_min_Mon","avg_avail_min_Tue","avg_avail_min_Wed","avg_avail_min_Thu","avg_avail_min_Fri"), -->
-<!--              headerStyle = list(color = "#212070", fontSize = "16px")), -->
-<!--     colGroup(name = "Scheduled Minutes by Day", -->
-<!--              columns = c("avg_sched_min_Mon","avg_sched_min_Tue","avg_sched_min_Wed","avg_sched_min_Thu","avg_sched_min_Fri"), -->
-<!--              headerStyle = list(color = "#d80b8c", fontSize = "16px")), -->
-<!--     colGroup(name = "Arrived Minutes by Day", -->
-<!--              columns = c("avg_arrived_min_Mon","avg_arrived_min_Tue","avg_arrived_min_Wed","avg_arrived_min_Thu","avg_arrived_min_Fri"), -->
-<!--              headerStyle = list(color = "#00aeef", fontSize = "16px")) -->
-<!--     ), -->
-
-<!--   columns = list( -->
-
-<!--     SITE = colDef( -->
-<!--       # footer = "Total", -->
-<!--       name = "Site", -->
-<!--       minWidth = 180), -->
-
-<!--     DEPT_SPECIALTY_NAME = colDef( -->
-<!--       name = "Specialty", -->
-<!--       minWidth = 180), -->
-
-<!--     DEPARTMENT_NAME = colDef( -->
-<!--       name = "Department", -->
-<!--       minWidth = 230), -->
-
-<!--     PROV_NAME = colDef( -->
-<!--       name = "Provider", -->
-<!--       minWidth = 180), -->
-
-<!--     Appt.MonthYear = colDef( -->
-<!--       name = "Month", -->
-<!--       minWidth = 90), -->
-
-<!--     avail_hours_week = colDef( -->
-<!--       name = "Available Hours per Week", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#7f7f7f", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     sched_hours_week = colDef( -->
-<!--       name = "Scheduled Hours per Week", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#7f7f7f", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     arrived_hours_week = colDef( -->
-<!--       name = "Arrived Hours per Week", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#7f7f7f", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_avail_min_Mon = colDef( -->
-<!--       name = "Mon", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_avail_min_Tue = colDef( -->
-<!--       name = "Tue", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_avail_min_Wed = colDef( -->
-<!--       name = "Wed", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_avail_min_Thu = colDef( -->
-<!--       name = "Thu", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_avail_min_Fri = colDef( -->
-<!--       name = "Fri", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_sched_min_Mon = colDef( -->
-<!--       name = "Mon", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_sched_min_Tue = colDef( -->
-<!--       name = "Tue", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_sched_min_Wed = colDef( -->
-<!--       name = "Wed", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_sched_min_Thu = colDef( -->
-<!--       name = "Thu", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_sched_min_Fri = colDef( -->
-<!--       name = "Fri", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_arrived_min_Mon = colDef( -->
-<!--       name = "Mon", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_arrived_min_Tue = colDef( -->
-<!--       name = "Tue", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_arrived_min_Wed = colDef( -->
-<!--       name = "Wed", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_arrived_min_Thu = colDef( -->
-<!--       name = "Thu", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_arrived_min_Fri = colDef( -->
-<!--       name = "Fri", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     DEPARTMENT_ID = colDef(show =F), -->
-<!--     NPI = colDef(show =F), -->
-<!--     VISIT_PROV_STAFF_RESOURCE_C = colDef(show =F), -->
-<!--     avail_min = colDef(show =F), -->
-<!--     sched_min = colDef(show =F), -->
-<!--     arrived_min = colDef(show =F), -->
-<!--     held_min = colDef(show =F), -->
-<!--     private_min = colDef(show =F), -->
-<!--     avail_hours = colDef(show =F), -->
-<!--     sched_hours = colDef(show =F), -->
-<!--     arrived_hours = colDef(show =F), -->
-<!--     held_hours = colDef(show =F), -->
-<!--     private_hours = colDef(show =F), -->
-<!--     held_hours_week = colDef(show =F), -->
-<!--     private_hours_week = colDef(show =F), -->
-<!--     held_perc = colDef(show =F), -->
-<!--     private_perc = colDef(show =F), -->
-<!--     schedule_util = colDef(show =F), -->
-<!--     provider_util = colDef(show =F), -->
-<!--     avg_avail_min_Sat = colDef(show =F), -->
-<!--     avg_avail_min_Sun = colDef(show =F), -->
-<!--     avg_sched_min_Sat = colDef(show =F), -->
-<!--     avg_sched_min_Sun = colDef(show =F), -->
-<!--     avg_arrived_min_Sat = colDef(show =F), -->
-<!--     avg_arrived_min_Sun = colDef(show =F), -->
-<!--     avg_held_min_Mon = colDef(show =F), -->
-<!--     avg_held_min_Tue = colDef(show =F), -->
-<!--     avg_held_min_Wed = colDef(show =F), -->
-<!--     avg_held_min_Thu = colDef(show =F), -->
-<!--     avg_held_min_Fri = colDef(show =F), -->
-<!--     avg_held_min_Sat = colDef(show =F), -->
-<!--     avg_held_min_Sun = colDef(show =F), -->
-<!--     avg_private_min_Mon = colDef(show =F), -->
-<!--     avg_private_min_Tue = colDef(show =F), -->
-<!--     avg_private_min_Wed = colDef(show =F), -->
-<!--     avg_private_min_Thu = colDef(show =F), -->
-<!--     avg_private_min_Fri = colDef(show =F), -->
-<!--     avg_private_min_Sat = colDef(show =F), -->
-<!--     avg_private_min_Sun = colDef(show =F), -->
-<!--     avg_held_perc_Mon = colDef(show =F), -->
-<!--     avg_held_perc_Tue = colDef(show =F), -->
-<!--     avg_held_perc_Wed = colDef(show =F), -->
-<!--     avg_held_perc_Thu = colDef(show =F), -->
-<!--     avg_held_perc_Fri = colDef(show =F), -->
-<!--     avg_held_perc_Sat = colDef(show =F), -->
-<!--     avg_held_perc_Sun = colDef(show =F), -->
-<!--     avg_private_perc_Mon = colDef(show =F), -->
-<!--     avg_private_perc_Tue = colDef(show =F), -->
-<!--     avg_private_perc_Wed = colDef(show =F), -->
-<!--     avg_private_perc_Thu = colDef(show =F), -->
-<!--     avg_private_perc_Fri = colDef(show =F), -->
-<!--     avg_private_perc_Sat = colDef(show =F), -->
-<!--     avg_private_perc_Sun = colDef(show =F), -->
-<!--     avg_schedule_util_Mon = colDef(show =F), -->
-<!--     avg_schedule_util_Tue = colDef(show =F), -->
-<!--     avg_schedule_util_Wed = colDef(show =F), -->
-<!--     avg_schedule_util_Thu = colDef(show =F), -->
-<!--     avg_schedule_util_Fri = colDef(show =F), -->
-<!--     avg_schedule_util_Sat = colDef(show =F), -->
-<!--     avg_schedule_util_Sun = colDef(show =F), -->
-<!--     avg_provider_util_Mon = colDef(show =F), -->
-<!--     avg_provider_util_Tue = colDef(show =F), -->
-<!--     avg_provider_util_Wed = colDef(show =F), -->
-<!--     avg_provider_util_Thu = colDef(show =F), -->
-<!--     avg_provider_util_Fri = colDef(show =F), -->
-<!--     avg_provider_util_Sat = colDef(show =F), -->
-<!--     avg_provider_util_Sun = colDef(show =F) -->
-
-<!--   ) # Close Columns -->
-
-<!--   ) # Close Reactable -->
-
-<!--  # ) -->
-<!-- # ) -->
-
-
-<!-- ``` -->
-<!-- <br/> -->
-<!-- <br/> -->
-<!-- <br/> -->
-
-
-<!-- #### On-Hold Slots/Times -->
-<!-- <span style='font-size: 20px; font-weight:bold; font-style:italic; color: #212070'>*Excludes any templates with no scheduling activities; refer to "Unused Templates" section.</span><br/> -->
-<!-- ```{r On Hold by Month Table Output, echo = FALSE, warning = FALSE, message = FALSE} -->
-
-
-<!-- # Table Output ----------------------------------------------------------------- -->
-<!-- # htmltools::browsable( -->
-<!-- #   tagList( -->
-<!-- #     tags$button( -->
-<!-- #       tagList(fontawesome::fa("download"), "Download Table"), -->
-<!-- #       onclick = "Reactable.downloadDataCSV('other-download-table', 'Template Utilization')" -->
-<!-- #     ), -->
-
-<!-- # htmltools::browsable( -->
-<!-- #   tagList( -->
-<!-- #     div(tags$label("Group by", `for` = "cars-grouping-select")), -->
-<!-- #     tags$select( -->
-<!-- #       id = "cars-grouping-select", -->
-<!-- #       onchange = "Reactable.setGroupBy('cars-grouping-table', this.value ? [this.value] : [])", -->
-<!-- #       tags$option("None", value = c("Campus","Campus.Specialty.Group")), -->
-<!-- #       # tags$option("Test", value = c("Appt.Source.New","Campus.Specialty.Group")), -->
-<!-- #       # lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option) -->
-<!-- #       lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option) -->
-<!-- #     ), -->
-<!-- # -->
-<!-- #     tags$hr("aria-hidden" = "true"), -->
-
-<!-- reactable( -->
-<!--   utilization_output %>% -->
-<!--     filter(SITE %!in% c("MS NOW", "MSH- AMBULATORY CARE", "OTHER", "NYEE")), -->
-
-<!--   elementId = "other-download-table", -->
-<!--   # elementId = "cars-grouping-table", -->
-<!--   style = list(fontFamily = 'Calibri', -->
-<!--                  fontSize = '14px'), -->
-<!--     defaultColDef = colDef(align = "left", -->
-<!--                            headerStyle = list(fontWeight = "Bold", fontSize = "14px"), -->
-<!--                            headerClass = "bar-sort-header"), -->
-
-<!--     highlight = TRUE, -->
-<!--     # filterable = TRUE, -->
-<!--     pagination = FALSE, -->
-<!--     height = 700, -->
-<!--     wrap = TRUE, -->
-<!--   searchable = TRUE, -->
-
-<!--   # rowStyle = function(index) { -->
-<!--   #           if (index %in% c(10)) { -->
-<!--   #             list(`border-top` = "2px solid rgb(184,184,184)", -->
-<!--   #                  fontWeight = "Bold") -->
-<!--   #           } -->
-<!--   #         }, -->
-
-<!--   groupBy = c("SITE", "DEPT_SPECIALTY_NAME", "DEPARTMENT_NAME", "PROV_NAME"), -->
-
-<!--   columnGroups = list( -->
-<!--     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " Visit Volume"), -->
-<!--     #          headerStyle = list(color = "#212070", fontSize = "16px")), -->
-<!--     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " No Show Rate"), -->
-<!--     #          columns = c("noShow_rate", "noShow_rate_Established", "noShow_rate_New"), -->
-<!--     #          headerStyle = list(color = "#d80b8c", fontSize = "16px")) -->
-<!--     colGroup(name = "", -->
-<!--              columns = c("SITE","DEPT_SPECIALTY_NAME","DEPARTMENT_NAME","PROV_NAME","Appt.MonthYear"), sticky = "left", -->
-<!--              headerStyle = list(fontSize = "16px")), -->
-<!--     colGroup(name = "Available Hours", -->
-<!--              columns = c("avail_hours_week"), -->
-<!--              headerStyle = list(color = "#7f7f7f", fontSize = "16px")), -->
-<!--     colGroup(name = "% On-Hold vs. Private Hours", -->
-<!--              columns = c("held_perc", "private_perc"), -->
-<!--              headerStyle = list(color = "#212070", fontSize = "16px")), -->
-<!--     colGroup(name = "% On-Hold Hours by Day", -->
-<!--              columns = c("avg_held_perc_Mon","avg_held_perc_Tue","avg_held_perc_Wed","avg_held_perc_Thu","avg_held_perc_Fri"), -->
-<!--              headerStyle = list(color = "#d80b8c", fontSize = "16px")), -->
-<!--     colGroup(name = "% Private Hours by Day", -->
-<!--              columns = c("avg_private_perc_Mon","avg_private_perc_Tue","avg_private_perc_Wed","avg_private_perc_Thu","avg_private_perc_Fri"), -->
-<!--              headerStyle = list(color = "#00aeef", fontSize = "16px")) -->
-<!--     ), -->
-
-<!--   columns = list( -->
-
-<!--     SITE = colDef( -->
-<!--       # footer = "Total", -->
-<!--       name = "Site", -->
-<!--       minWidth = 180), -->
-
-<!--     DEPT_SPECIALTY_NAME = colDef( -->
-<!--       name = "Specialty", -->
-<!--       minWidth = 180), -->
-
-<!--     DEPARTMENT_NAME = colDef( -->
-<!--       name = "Department", -->
-<!--       minWidth = 230), -->
-
-<!--     PROV_NAME = colDef( -->
-<!--       name = "Provider", -->
-<!--       minWidth = 180), -->
-
-<!--     Appt.MonthYear = colDef( -->
-<!--       name = "Month", -->
-<!--       minWidth = 90), -->
-
-<!--     avail_hours_week = colDef( -->
-<!--       name = "Available Hours per Week", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#7f7f7f", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     held_perc = colDef( -->
-<!--       name = "% On-Hold Hours", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalheld_min = 0 -->
-<!--         let totalavail_min = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalheld_min += row['held_min'] -->
-<!--           totalavail_min += row['avail_min'] -->
-<!--         }) -->
-<!--         return (totalheld_min) / totalavail_min || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 1), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     private_perc = colDef( -->
-<!--       name = "% Private Hours", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalprivate_min = 0 -->
-<!--         let totalavail_min = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalprivate_min += row['private_min'] -->
-<!--           totalavail_min += row['avail_min'] -->
-<!--         }) -->
-<!--         return (totalprivate_min) / totalavail_min || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 1), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_held_perc_Mon = colDef( -->
-<!--       name = "Mon", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_held_min_Mon = 0 -->
-<!--         let totalavg_avail_min_Mon = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_held_min_Mon += row['avg_held_min_Mon'] -->
-<!--           totalavg_avail_min_Mon += row['avg_avail_min_Mon'] -->
-<!--         }) -->
-<!--         return (totalavg_held_min_Mon) / totalavg_avail_min_Mon || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_held_perc_Tue = colDef( -->
-<!--       name = "Tue", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_held_min_Tue = 0 -->
-<!--         let totalavg_avail_min_Tue = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_held_min_Tue += row['avg_held_min_Tue'] -->
-<!--           totalavg_avail_min_Tue += row['avg_avail_min_Tue'] -->
-<!--         }) -->
-<!--         return (totalavg_held_min_Tue) / totalavg_avail_min_Tue || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_held_perc_Wed = colDef( -->
-<!--       name = "Wed", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_held_min_Wed = 0 -->
-<!--         let totalavg_avail_min_Wed = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_held_min_Wed += row['avg_held_min_Wed'] -->
-<!--           totalavg_avail_min_Wed += row['avg_avail_min_Wed'] -->
-<!--         }) -->
-<!--         return (totalavg_held_min_Wed) / totalavg_avail_min_Wed || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_held_perc_Thu = colDef( -->
-<!--       name = "Thu", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_held_min_Thu = 0 -->
-<!--         let totalavg_avail_min_Thu = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_held_min_Thu += row['avg_held_min_Thu'] -->
-<!--           totalavg_avail_min_Thu += row['avg_avail_min_Thu'] -->
-<!--         }) -->
-<!--         return (totalavg_held_min_Thu) / totalavg_avail_min_Thu || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_held_perc_Fri = colDef( -->
-<!--       name = "Fri", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_held_min_Fri = 0 -->
-<!--         let totalavg_avail_min_Fri = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_held_min_Fri += row['avg_held_min_Fri'] -->
-<!--           totalavg_avail_min_Fri += row['avg_avail_min_Fri'] -->
-<!--         }) -->
-<!--         return (totalavg_held_min_Fri) / totalavg_avail_min_Fri || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_private_perc_Mon = colDef( -->
-<!--       name = "Mon", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_private_min_Mon = 0 -->
-<!--         let totalavg_avail_min_Mon = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_private_min_Mon += row['avg_private_min_Mon'] -->
-<!--           totalavg_avail_min_Mon += row['avg_avail_min_Mon'] -->
-<!--         }) -->
-<!--         return (totalavg_private_min_Mon) / totalavg_avail_min_Mon || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_private_perc_Tue = colDef( -->
-<!--       name = "Tue", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_private_min_Tue = 0 -->
-<!--         let totalavg_avail_min_Tue = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_private_min_Tue += row['avg_private_min_Tue'] -->
-<!--           totalavg_avail_min_Tue += row['avg_avail_min_Tue'] -->
-<!--         }) -->
-<!--         return (totalavg_private_min_Tue) / totalavg_avail_min_Tue || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_private_perc_Wed = colDef( -->
-<!--       name = "Wed", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_private_min_Wed = 0 -->
-<!--         let totalavg_avail_min_Wed = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_private_min_Wed += row['avg_private_min_Wed'] -->
-<!--           totalavg_avail_min_Wed += row['avg_avail_min_Wed'] -->
-<!--         }) -->
-<!--         return (totalavg_private_min_Wed) / totalavg_avail_min_Wed || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_private_perc_Thu = colDef( -->
-<!--       name = "Thu", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_private_min_Thu = 0 -->
-<!--         let totalavg_avail_min_Thu = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_private_min_Thu += row['avg_private_min_Thu'] -->
-<!--           totalavg_avail_min_Thu += row['avg_avail_min_Thu'] -->
-<!--         }) -->
-<!--         return (totalavg_private_min_Thu) / totalavg_avail_min_Thu || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_private_perc_Fri = colDef( -->
-<!--       name = "Fri", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_private_min_Fri = 0 -->
-<!--         let totalavg_avail_min_Fri = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_private_min_Fri += row['avg_private_min_Fri'] -->
-<!--           totalavg_avail_min_Fri += row['avg_avail_min_Fri'] -->
-<!--         }) -->
-<!--         return (totalavg_private_min_Fri) / totalavg_avail_min_Fri || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-
-<!--     DEPARTMENT_ID = colDef(show =F), -->
-<!--     NPI = colDef(show =F), -->
-<!--     VISIT_PROV_STAFF_RESOURCE_C = colDef(show =F), -->
-<!--     avail_min = colDef(show =F), -->
-<!--     sched_min = colDef(show =F), -->
-<!--     arrived_min = colDef(show =F), -->
-<!--     held_min = colDef(show =F), -->
-<!--     private_min = colDef(show =F), -->
-<!--     avail_hours = colDef(show =F), -->
-<!--     sched_hours = colDef(show =F), -->
-<!--     arrived_hours = colDef(show =F), -->
-<!--     held_hours = colDef(show =F), -->
-<!--     sched_hours_week = colDef(show =F), -->
-<!--     arrived_hours_week = colDef(show =F), -->
-<!--     held_hours_week = colDef(show =F), -->
-<!--     private_hours_week = colDef(show =F), -->
-<!--     private_hours = colDef(show =F), -->
-<!--     schedule_util = colDef(show =F), -->
-<!--     provider_util = colDef(show =F), -->
-<!--     avg_avail_min_Mon = colDef(show =F), -->
-<!--     avg_avail_min_Tue = colDef(show =F), -->
-<!--     avg_avail_min_Wed = colDef(show =F), -->
-<!--     avg_avail_min_Thu = colDef(show =F), -->
-<!--     avg_avail_min_Fri = colDef(show =F), -->
-<!--     avg_avail_min_Sat = colDef(show =F), -->
-<!--     avg_avail_min_Sun = colDef(show =F), -->
-<!--     avg_sched_min_Mon = colDef(show =F), -->
-<!--     avg_sched_min_Tue = colDef(show =F), -->
-<!--     avg_sched_min_Wed = colDef(show =F), -->
-<!--     avg_sched_min_Thu = colDef(show =F), -->
-<!--     avg_sched_min_Fri = colDef(show =F), -->
-<!--     avg_sched_min_Sat = colDef(show =F), -->
-<!--     avg_sched_min_Sun = colDef(show =F), -->
-<!--     avg_arrived_min_Mon = colDef(show =F), -->
-<!--     avg_arrived_min_Tue = colDef(show =F), -->
-<!--     avg_arrived_min_Wed = colDef(show =F), -->
-<!--     avg_arrived_min_Thu = colDef(show =F), -->
-<!--     avg_arrived_min_Fri = colDef(show =F), -->
-<!--     avg_arrived_min_Sat = colDef(show =F), -->
-<!--     avg_arrived_min_Sun = colDef(show =F), -->
-<!--     avg_held_min_Mon = colDef(show =F), -->
-<!--     avg_held_min_Tue = colDef(show =F), -->
-<!--     avg_held_min_Wed = colDef(show =F), -->
-<!--     avg_held_min_Thu = colDef(show =F), -->
-<!--     avg_held_min_Fri = colDef(show =F), -->
-<!--     avg_held_min_Sat = colDef(show =F), -->
-<!--     avg_held_min_Sun = colDef(show =F), -->
-<!--     avg_private_min_Mon = colDef(show =F), -->
-<!--     avg_private_min_Tue = colDef(show =F), -->
-<!--     avg_private_min_Wed = colDef(show =F), -->
-<!--     avg_private_min_Thu = colDef(show =F), -->
-<!--     avg_private_min_Fri = colDef(show =F), -->
-<!--     avg_private_min_Sat = colDef(show =F), -->
-<!--     avg_private_min_Sun = colDef(show =F), -->
-<!--     avg_held_perc_Sat = colDef(show =F), -->
-<!--     avg_held_perc_Sun = colDef(show =F), -->
-<!--     avg_private_perc_Sat = colDef(show =F), -->
-<!--     avg_private_perc_Sun = colDef(show =F), -->
-<!--     avg_schedule_util_Mon = colDef(show =F), -->
-<!--     avg_schedule_util_Tue = colDef(show =F), -->
-<!--     avg_schedule_util_Wed = colDef(show =F), -->
-<!--     avg_schedule_util_Thu = colDef(show =F), -->
-<!--     avg_schedule_util_Fri = colDef(show =F), -->
-<!--     avg_schedule_util_Sat = colDef(show =F), -->
-<!--     avg_schedule_util_Sun = colDef(show =F), -->
-<!--     avg_provider_util_Mon = colDef(show =F), -->
-<!--     avg_provider_util_Tue = colDef(show =F), -->
-<!--     avg_provider_util_Wed = colDef(show =F), -->
-<!--     avg_provider_util_Thu = colDef(show =F), -->
-<!--     avg_provider_util_Fri = colDef(show =F), -->
-<!--     avg_provider_util_Sat = colDef(show =F), -->
-<!--     avg_provider_util_Sun = colDef(show =F) -->
-
-<!--   ) # Close Columns -->
-
-<!--   ) # Close Reactable -->
-
-<!--  # ) -->
-<!-- # ) -->
-
-
-<!-- ``` -->
-<!-- <br/> -->
-<!-- <br/> -->
-<!-- <br/> -->
-
-
-### Providers Only
-#### Template Utilization
-<span style='font-size: 20px; font-weight:bold; font-style:italic; color: #212070'>*Excludes any templates with no scheduling activities; refer to "Unused Templates" section.</span><br/>
-```{r Provider Utilization by Month Table Output, echo = FALSE, warning = FALSE, message = FALSE}
+### TEMPLATE UTILIZATION
+```{r Utilization by Month Table Output, echo = FALSE, warning = FALSE, message = FALSE}
 
 
 # Table Output -----------------------------------------------------------------
@@ -1920,7 +443,7 @@ ________________________________________________________________________________
 #   tagList(
 #     tags$button(
 #       tagList(fontawesome::fa("download"), "Download Table"),
-#       onclick = "Reactable.downloadDataCSV('util-prov-download-table', 'Template Utilization')"
+#       onclick = "Reactable.downloadDataCSV('util-download-table', 'Template Utilization')"
 #     ),
 
 # htmltools::browsable(
@@ -1934,29 +457,28 @@ ________________________________________________________________________________
 #       # lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option)
 #       lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option)
 #     ),
-#
+# 
 #     tags$hr("aria-hidden" = "true"),
 
 reactable(
-  utilization_output %>%
-    filter(SITE %!in% c("MS NOW", "MSH- AMBULATORY CARE", "OTHER", "NYEE")) %>%
-    filter(VISIT_PROV_STAFF_RESOURCE_C == 1),
-
-  # elementId = "util-prov-download-table",
+  slot_util_summary %>%
+    mutate(MSHS = "MSHS Total"),
+  
+  elementId = "util-download-table",
   # elementId = "cars-grouping-table",
   style = list(fontFamily = 'Calibri',
                  fontSize = '14px'),
     defaultColDef = colDef(align = "left",
                            headerStyle = list(fontWeight = "Bold", fontSize = "14px"),
                            headerClass = "bar-sort-header"),
-
+  
     highlight = TRUE,
     # filterable = TRUE,
     pagination = FALSE,
     height = 700,
     wrap = TRUE,
   searchable = TRUE,
-
+  
   # rowStyle = function(index) {
   #           if (index %in% c(10)) {
   #             list(`border-top` = "2px solid rgb(184,184,184)",
@@ -1964,55 +486,57 @@ reactable(
   #           }
   #         },
 
-  groupBy = c("Appt.MonthYear", "SITE", "DEPT_SPECIALTY_NAME", "DEPARTMENT_NAME", "PROV_NAME"),
+  groupBy = c("MSHS", "CAMPUS", "DEPT_SPECIALTY_NAME", "DEPARTMENT", "PROVIDER", "SLOT_MONTH_YEAR"),
 
   columnGroups = list(
-    # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " Visit Volume"),
+    # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " Visit Volume"), 
     #          columns = c("Total", "new_perc"),
     #          headerStyle = list(color = "#212070", fontSize = "16px")),
-    # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " No Show Rate"),
+    # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " No Show Rate"), 
     #          columns = c("noShow_rate", "noShow_rate_Established", "noShow_rate_New"),
     #          headerStyle = list(color = "#d80b8c", fontSize = "16px"))
-    colGroup(name = "",
-             columns = c("Appt.MonthYear","SITE","DEPT_SPECIALTY_NAME","DEPARTMENT_NAME","PROV_NAME"), sticky = "left",
+    colGroup(name = "", 
+             columns = c("MSHS", "CAMPUS", "DEPT_SPECIALTY_NAME", "DEPARTMENT", "PROVIDER", "SLOT_MONTH_YEAR"), sticky = "left", 
              headerStyle = list(fontSize = "16px")),
-    colGroup(name = "Available Hours",
+    colGroup(name = "Available Hours", 
              columns = c("avail_hours","avail_hours_week"),
              headerStyle = list(color = "#7f7f7f", fontSize = "16px")),
-    colGroup(name = "Overall Utilization",
-             columns = c("schedule_util","provider_util"),
+    colGroup(name = "Overall Utilization", 
+             columns = c("sched_util","prov_util"),
              headerStyle = list(color = "#212070", fontSize = "16px")),
-    colGroup(name = "Schedule Utiliation by Day",
-             columns = c("avg_schedule_util_Mon", "avg_schedule_util_Tue", "avg_schedule_util_Wed", "avg_schedule_util_Thu", "avg_schedule_util_Fri"),
+    colGroup(name = "Schedule Utiliation by Day", 
+             columns = c("sched_util_day_MON", "sched_util_day_TUE", "sched_util_day_WED", "sched_util_day_THU", "sched_util_day_FRI",
+                         "sched_util_day_SAT"),
              headerStyle = list(color = "#d80b8c", fontSize = "16px")),
-    colGroup(name = "Provider Utiliation by Day",
-             columns = c("avg_provider_util_Mon", "avg_provider_util_Tue", "avg_provider_util_Wed", "avg_provider_util_Thu", "avg_provider_util_Fri"),
+    colGroup(name = "Provider Utiliation by Day", 
+             columns = c("prov_util_day_MON", "prov_util_day_TUE", "prov_util_day_WED", "prov_util_day_THU", "prov_util_day_FRI",
+                         "prov_util_day_SAT"),
              headerStyle = list(color = "#00aeef", fontSize = "16px"))
     ),
 
   columns = list(
 
-    SITE = colDef(
+    CAMPUS = colDef(
       # footer = "Total",
       name = "Site",
-      minWidth = 180),
+      minWidth = 140),
 
     DEPT_SPECIALTY_NAME = colDef(
       name = "Specialty",
       minWidth = 180),
-
-    DEPARTMENT_NAME = colDef(
+    
+    DEPARTMENT = colDef(
       name = "Department",
-      minWidth = 230),
-
-    PROV_NAME = colDef(
+      minWidth = 220),
+    
+    PROVIDER = colDef(
       name = "Provider",
       minWidth = 180),
-
-    Appt.MonthYear = colDef(
+    
+    SLOT_MONTH_YEAR = colDef(
       name = "Month",
-      minWidth = 120),
-
+      minWidth = 90),
+    
     avail_hours = colDef(
       name = "Available Hours",
       maxWidth = 130,
@@ -2021,7 +545,7 @@ reactable(
       format = colFormat(separators = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
     ),
-
+    
     avail_hours_week = colDef(
       name = "Available Hours per Week",
       maxWidth = 130,
@@ -2031,1159 +555,274 @@ reactable(
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
     ),
 
-    schedule_util = colDef(
+    sched_util = colDef(
       name = "Schedule Utilization",
       maxWidth = 130,
       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"),
       aggregate = JS("function(values, rows) {
-        let totalavail_min = 0
-        let totalsched_min = 0
+        let totalavail_hours = 0
+        let totalsched_hours = 0
         rows.forEach(function(row) {
-          totalavail_min += row['avail_min']
-          totalsched_min += row['sched_min']
+          totalavail_hours += row['avail_hours']
+          totalsched_hours += row['sched_hours']
         })
-        return (totalsched_min) / totalavail_min || '-'
+        return (totalsched_hours) / totalavail_hours || '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
     ),
-
-    provider_util = colDef(
+    
+    prov_util = colDef(
       name = "Provider Utilization",
       maxWidth = 130,
       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"),
       aggregate = JS("function(values, rows) {
-        let totalavail_min = 0
-        let totalarrived_min = 0
+        let totalavail_hours = 0
+        let totalarrived_hours = 0
         rows.forEach(function(row) {
-          totalavail_min += row['avail_min']
-          totalarrived_min += row['arrived_min']
+          totalavail_hours += row['avail_hours']
+          totalarrived_hours += row['arrived_hours']
         })
-        return (totalarrived_min) / totalavail_min || '-'
+        return (totalarrived_hours) / totalavail_hours || '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
     ),
 
-    avg_schedule_util_Mon = colDef(
+    sched_util_day_MON = colDef(
       name = "Mon",
       maxWidth = 60,
       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"),
       aggregate = JS("function(values, rows) {
-        let totalavg_avail_min_Mon = 0
-        let totalavg_sched_min_Mon = 0
+        let totalavail_hours_day_MON = 0
+        let totalsched_hours_day_MON = 0
         rows.forEach(function(row) {
-          totalavg_avail_min_Mon += row['avg_avail_min_Mon']
-          totalavg_sched_min_Mon += row['avg_sched_min_Mon']
+          totalavail_hours_day_MON += row['avail_hours_day_MON']
+          totalsched_hours_day_MON += row['sched_hours_day_MON']
         })
-        return (totalavg_sched_min_Mon) / totalavg_avail_min_Mon || '-'
+        return (totalsched_hours_day_MON) / totalavail_hours_day_MON || '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
     ),
 
-    avg_schedule_util_Tue = colDef(
+    sched_util_day_TUE = colDef(
       name = "Tue",
       maxWidth = 60,
       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"),
       aggregate = JS("function(values, rows) {
-        let totalavg_avail_min_Tue = 0
-        let totalavg_sched_min_Tue = 0
+        let totalavail_hours_day_TUE = 0
+        let totalsched_hours_day_TUE = 0
         rows.forEach(function(row) {
-          totalavg_avail_min_Tue += row['avg_avail_min_Tue']
-          totalavg_sched_min_Tue += row['avg_sched_min_Tue']
+          totalavail_hours_day_TUE += row['avail_hours_day_TUE']
+          totalsched_hours_day_TUE += row['sched_hours_day_TUE']
         })
-        return (totalavg_sched_min_Tue) / totalavg_avail_min_Tue || '-'
+        return (totalsched_hours_day_TUE) / totalavail_hours_day_TUE || '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
     ),
 
-    avg_schedule_util_Wed = colDef(
+    sched_util_day_WED = colDef(
       name = "Wed",
       maxWidth = 60,
       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"),
       aggregate = JS("function(values, rows) {
-        let totalavg_avail_min_Wed = 0
-        let totalavg_sched_min_Wed = 0
+        let totalavail_hours_day_WED = 0
+        let totalsched_hours_day_WED = 0
         rows.forEach(function(row) {
-          totalavg_avail_min_Wed += row['avg_avail_min_Wed']
-          totalavg_sched_min_Wed += row['avg_sched_min_Wed']
+          totalavail_hours_day_WED += row['avail_hours_day_WED']
+          totalsched_hours_day_WED += row['sched_hours_day_WED']
         })
-        return (totalavg_sched_min_Wed) / totalavg_avail_min_Wed || '-'
+        return (totalsched_hours_day_WED) / totalavail_hours_day_WED || '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
     ),
 
-    avg_schedule_util_Thu = colDef(
+    sched_util_day_THU = colDef(
       name = "Thu",
       maxWidth = 60,
       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"),
       aggregate = JS("function(values, rows) {
-        let totalavg_avail_min_Thu = 0
-        let totalavg_sched_min_Thu = 0
+        let totalavail_hours_day_THU = 0
+        let totalsched_hours_day_THU = 0
         rows.forEach(function(row) {
-          totalavg_avail_min_Thu += row['avg_avail_min_Thu']
-          totalavg_sched_min_Thu += row['avg_sched_min_Thu']
+          totalavail_hours_day_THU += row['avail_hours_day_THU']
+          totalsched_hours_day_THU += row['sched_hours_day_THU']
         })
-        return (totalavg_sched_min_Thu) / totalavg_avail_min_Thu || '-'
+        return (totalsched_hours_day_THU) / totalavail_hours_day_THU || '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
     ),
 
-    avg_schedule_util_Fri = colDef(
+    sched_util_day_FRI = colDef(
       name = "Fri",
       maxWidth = 60,
       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"),
       aggregate = JS("function(values, rows) {
-        let totalavg_avail_min_Fri = 0
-        let totalavg_sched_min_Fri = 0
+        let totalavail_hours_day_FRI = 0
+        let totalsched_hours_day_FRI = 0
         rows.forEach(function(row) {
-          totalavg_avail_min_Fri += row['avg_avail_min_Fri']
-          totalavg_sched_min_Fri += row['avg_sched_min_Fri']
+          totalavail_hours_day_FRI += row['avail_hours_day_FRI']
+          totalsched_hours_day_FRI += row['sched_hours_day_FRI']
         })
-        return (totalavg_sched_min_Fri) / totalavg_avail_min_Fri || '-'
+        return (totalsched_hours_day_FRI) / totalavail_hours_day_FRI || '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
     ),
 
-    avg_provider_util_Mon = colDef(
+    sched_util_day_SAT = colDef(
+      name = "Sat",
+      maxWidth = 60,
+      headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours_day_SAT = 0
+        let totalsched_hours_day_SAT = 0
+        rows.forEach(function(row) {
+          totalavail_hours_day_SAT += row['avail_hours_day_SAT']
+          totalsched_hours_day_SAT += row['sched_hours_day_SAT']
+        })
+        return (totalsched_hours_day_SAT) / totalavail_hours_day_SAT || '-'
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
+    prov_util_day_MON = colDef(
       name = "Mon",
       maxWidth = 60,
       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"),
       aggregate = JS("function(values, rows) {
-        let totalavg_avail_min_Mon = 0
-        let totalavg_arrived_min_Mon = 0
+        let totalavail_hours_day_MON = 0
+        let totalarrived_hours_day_MON = 0
         rows.forEach(function(row) {
-          totalavg_avail_min_Mon += row['avg_avail_min_Mon']
-          totalavg_arrived_min_Mon += row['avg_arrived_min_Mon']
+          totalavail_hours_day_MON += row['avail_hours_day_MON']
+          totalarrived_hours_day_MON += row['arrived_hours_day_MON']
         })
-        return (totalavg_arrived_min_Mon) / totalavg_avail_min_Mon || '-'
+        return (totalarrived_hours_day_MON) / totalavail_hours_day_MON || '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
     ),
 
-    avg_provider_util_Tue = colDef(
+    prov_util_day_TUE = colDef(
       name = "Tue",
       maxWidth = 60,
       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"),
       aggregate = JS("function(values, rows) {
-        let totalavg_avail_min_Tue = 0
-        let totalavg_arrived_min_Tue = 0
+        let totalavail_hours_day_TUE = 0
+        let totalarrived_hours_day_TUE = 0
         rows.forEach(function(row) {
-          totalavg_avail_min_Tue += row['avg_avail_min_Tue']
-          totalavg_arrived_min_Tue += row['avg_arrived_min_Tue']
+          totalavail_hours_day_TUE += row['avail_hours_day_TUE']
+          totalarrived_hours_day_TUE += row['arrived_hours_day_TUE']
         })
-        return (totalavg_arrived_min_Tue) / totalavg_avail_min_Tue || '-'
+        return (totalarrived_hours_day_TUE) / totalavail_hours_day_TUE || '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
     ),
 
-    avg_provider_util_Wed = colDef(
+    prov_util_day_WED = colDef(
       name = "Wed",
       maxWidth = 60,
       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"),
       aggregate = JS("function(values, rows) {
-        let totalavg_avail_min_Wed = 0
-        let totalavg_arrived_min_Wed = 0
+        let totalavail_hours_day_WED = 0
+        let totalarrived_hours_day_WED = 0
         rows.forEach(function(row) {
-          totalavg_avail_min_Wed += row['avg_avail_min_Wed']
-          totalavg_arrived_min_Wed += row['avg_arrived_min_Wed']
+          totalavail_hours_day_WED += row['avail_hours_day_WED']
+          totalarrived_hours_day_WED += row['arrived_hours_day_WED']
         })
-        return (totalavg_arrived_min_Wed) / totalavg_avail_min_Wed || '-'
+        return (totalarrived_hours_day_WED) / totalavail_hours_day_WED || '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
     ),
 
-    avg_provider_util_Thu = colDef(
+    prov_util_day_THU = colDef(
       name = "Thu",
       maxWidth = 60,
       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"),
       aggregate = JS("function(values, rows) {
-        let totalavg_avail_min_Thu = 0
-        let totalavg_arrived_min_Thu = 0
+        let totalavail_hours_day_THU = 0
+        let totalarrived_hours_day_THU = 0
         rows.forEach(function(row) {
-          totalavg_avail_min_Thu += row['avg_avail_min_Thu']
-          totalavg_arrived_min_Thu += row['avg_arrived_min_Thu']
+          totalavail_hours_day_THU += row['avail_hours_day_THU']
+          totalarrived_hours_day_THU += row['arrived_hours_day_THU']
         })
-        return (totalavg_arrived_min_Thu) / totalavg_avail_min_Thu || '-'
+        return (totalarrived_hours_day_THU) / totalavail_hours_day_THU || '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
     ),
 
-    avg_provider_util_Fri = colDef(
+    prov_util_day_FRI = colDef(
       name = "Fri",
       maxWidth = 60,
       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"),
       aggregate = JS("function(values, rows) {
-        let totalavg_avail_min_Fri = 0
-        let totalavg_arrived_min_Fri = 0
+        let totalavail_hours_day_FRI = 0
+        let totalarrived_hours_day_FRI = 0
         rows.forEach(function(row) {
-          totalavg_avail_min_Fri += row['avg_avail_min_Fri']
-          totalavg_arrived_min_Fri += row['avg_arrived_min_Fri']
+          totalavail_hours_day_FRI += row['avail_hours_day_FRI']
+          totalarrived_hours_day_FRI += row['arrived_hours_day_FRI']
         })
-        return (totalavg_arrived_min_Fri) / totalavg_avail_min_Fri || '-'
+        return (totalarrived_hours_day_FRI) / totalavail_hours_day_FRI || '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
     ),
 
-    DEPARTMENT_ID = colDef(show =F),
-    NPI = colDef(show =F),
-    VISIT_PROV_STAFF_RESOURCE_C = colDef(show =F),
-    avail_min = colDef(show =F),
-    sched_min = colDef(show =F),
-    arrived_min = colDef(show =F),
-    held_min = colDef(show =F),
-    private_min = colDef(show =F),
+    prov_util_day_SAT = colDef(
+      name = "Sat",
+      maxWidth = 60,
+      headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours_day_SAT = 0
+        let totalarrived_hours_day_SAT = 0
+        rows.forEach(function(row) {
+          totalavail_hours_day_SAT += row['avail_hours_day_SAT']
+          totalarrived_hours_day_SAT += row['arrived_hours_day_SAT']
+        })
+        return (totalarrived_hours_day_SAT) / totalavail_hours_day_SAT || '-'
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
     sched_hours = colDef(show =F),
     arrived_hours = colDef(show =F),
-    held_hours = colDef(show =F),
-    private_hours = colDef(show =F),
-    held_perc = colDef(show =F),
-    private_perc = colDef(show =F),
-    sched_hours_week = colDef(show =F),
-    arrived_hours_week = colDef(show =F),
-    held_hours_week = colDef(show =F),
-    private_hours_week = colDef(show =F),
-    avg_avail_min_Mon = colDef(show =F),
-    avg_avail_min_Tue = colDef(show =F),
-    avg_avail_min_Wed = colDef(show =F),
-    avg_avail_min_Thu = colDef(show =F),
-    avg_avail_min_Fri = colDef(show =F),
-    avg_avail_min_Sat = colDef(show =F),
-    avg_avail_min_Sun = colDef(show =F),
-    avg_sched_min_Mon = colDef(show =F),
-    avg_sched_min_Tue = colDef(show =F),
-    avg_sched_min_Wed = colDef(show =F),
-    avg_sched_min_Thu = colDef(show =F),
-    avg_sched_min_Fri = colDef(show =F),
-    avg_sched_min_Sat = colDef(show =F),
-    avg_sched_min_Sun = colDef(show =F),
-    avg_arrived_min_Mon = colDef(show =F),
-    avg_arrived_min_Tue = colDef(show =F),
-    avg_arrived_min_Wed = colDef(show =F),
-    avg_arrived_min_Thu = colDef(show =F),
-    avg_arrived_min_Fri = colDef(show =F),
-    avg_arrived_min_Sat = colDef(show =F),
-    avg_arrived_min_Sun = colDef(show =F),
-    avg_held_min_Mon = colDef(show =F),
-    avg_held_min_Tue = colDef(show =F),
-    avg_held_min_Wed = colDef(show =F),
-    avg_held_min_Thu = colDef(show =F),
-    avg_held_min_Fri = colDef(show =F),
-    avg_held_min_Sat = colDef(show =F),
-    avg_held_min_Sun = colDef(show =F),
-    avg_private_min_Mon = colDef(show =F),
-    avg_private_min_Tue = colDef(show =F),
-    avg_private_min_Wed = colDef(show =F),
-    avg_private_min_Thu = colDef(show =F),
-    avg_private_min_Fri = colDef(show =F),
-    avg_private_min_Sat = colDef(show =F),
-    avg_private_min_Sun = colDef(show =F),
-    avg_held_perc_Mon = colDef(show =F),
-    avg_held_perc_Tue = colDef(show =F),
-    avg_held_perc_Wed = colDef(show =F),
-    avg_held_perc_Thu = colDef(show =F),
-    avg_held_perc_Fri = colDef(show =F),
-    avg_held_perc_Sat = colDef(show =F),
-    avg_held_perc_Sun = colDef(show =F),
-    avg_private_perc_Mon = colDef(show =F),
-    avg_private_perc_Tue = colDef(show =F),
-    avg_private_perc_Wed = colDef(show =F),
-    avg_private_perc_Thu = colDef(show =F),
-    avg_private_perc_Fri = colDef(show =F),
-    avg_private_perc_Sat = colDef(show =F),
-    avg_private_perc_Sun = colDef(show =F),
-    avg_schedule_util_Sat = colDef(show =F),
-    avg_schedule_util_Sun = colDef(show =F),
-    avg_provider_util_Sat = colDef(show =F),
-    avg_provider_util_Sun = colDef(show =F)
-
+    avail_hours_day_MON = colDef(show =F),
+    avail_hours_day_TUE = colDef(show =F),
+    avail_hours_day_WED = colDef(show =F),
+    avail_hours_day_THU = colDef(show =F),
+    avail_hours_day_FRI = colDef(show =F),
+    avail_hours_day_SAT = colDef(show =F),
+    sched_hours_day_MON = colDef(show =F),
+    sched_hours_day_TUE = colDef(show =F),
+    sched_hours_day_WED = colDef(show =F),
+    sched_hours_day_THU = colDef(show =F),
+    sched_hours_day_FRI = colDef(show =F),
+    sched_hours_day_SAT = colDef(show =F),
+    arrived_hours_day_MON = colDef(show =F),
+    arrived_hours_day_TUE = colDef(show =F),
+    arrived_hours_day_WED = colDef(show =F),
+    arrived_hours_day_THU = colDef(show =F),
+    arrived_hours_day_FRI = colDef(show =F),
+    arrived_hours_day_SAT = colDef(show =F)
+   
   ) # Close Columns
 
   ) # Close Reactable
 
- # )
-# )
+#  ) # Close tagList
+# ) # Close htmltools
 
 
 ```
 <br/>
 <br/>
 <br/>
-
-
-<!-- #### Template Capacity -->
-<!-- <span style='font-size: 20px; font-weight:bold; font-style:italic; color: #212070'>*Excludes any templates with no scheduling activities; refer to "Unused Templates" section.</span><br/> -->
-<!-- ```{r Provider Template Capacity by Month Table Output, echo = FALSE, warning = FALSE, message = FALSE} -->
-
-
-<!-- # Table Output ----------------------------------------------------------------- -->
-<!-- # htmltools::browsable( -->
-<!-- #   tagList( -->
-<!-- #     tags$button( -->
-<!-- #       tagList(fontawesome::fa("download"), "Download Table"), -->
-<!-- #       onclick = "Reactable.downloadDataCSV('capacity-prov-download-table', 'Template Utilization')" -->
-<!-- #     ), -->
-
-<!-- # htmltools::browsable( -->
-<!-- #   tagList( -->
-<!-- #     div(tags$label("Group by", `for` = "cars-grouping-select")), -->
-<!-- #     tags$select( -->
-<!-- #       id = "cars-grouping-select", -->
-<!-- #       onchange = "Reactable.setGroupBy('cars-grouping-table', this.value ? [this.value] : [])", -->
-<!-- #       tags$option("None", value = c("Campus","Campus.Specialty.Group")), -->
-<!-- #       # tags$option("Test", value = c("Appt.Source.New","Campus.Specialty.Group")), -->
-<!-- #       # lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option) -->
-<!-- #       lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option) -->
-<!-- #     ), -->
-<!-- # -->
-<!-- #     tags$hr("aria-hidden" = "true"), -->
-
-<!-- reactable( -->
-<!--   utilization_output %>% -->
-<!--     filter(SITE %!in% c("MS NOW", "MSH- AMBULATORY CARE", "OTHER", "NYEE")) %>% -->
-<!--     filter(VISIT_PROV_STAFF_RESOURCE_C == 1), -->
-
-<!--   # elementId = "capacity-prov-download-table", -->
-<!--   # elementId = "cars-grouping-table", -->
-<!--   style = list(fontFamily = 'Calibri', -->
-<!--                  fontSize = '14px'), -->
-<!--     defaultColDef = colDef(align = "left", -->
-<!--                            headerStyle = list(fontWeight = "Bold", fontSize = "14px"), -->
-<!--                            headerClass = "bar-sort-header"), -->
-
-<!--     highlight = TRUE, -->
-<!--     # filterable = TRUE, -->
-<!--     pagination = FALSE, -->
-<!--     height = 700, -->
-<!--     wrap = TRUE, -->
-<!--   searchable = TRUE, -->
-
-<!--   # rowStyle = function(index) { -->
-<!--   #           if (index %in% c(10)) { -->
-<!--   #             list(`border-top` = "2px solid rgb(184,184,184)", -->
-<!--   #                  fontWeight = "Bold") -->
-<!--   #           } -->
-<!--   #         }, -->
-
-<!--   groupBy = c("SITE", "DEPT_SPECIALTY_NAME", "DEPARTMENT_NAME", "PROV_NAME"), -->
-
-<!--   columnGroups = list( -->
-<!--     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " Visit Volume"), -->
-<!--     #          columns = c("Total", "new_perc"), -->
-<!--     #          headerStyle = list(color = "#212070", fontSize = "16px")), -->
-<!--     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " No Show Rate"), -->
-<!--     #          columns = c("noShow_rate", "noShow_rate_Established", "noShow_rate_New"), -->
-<!--     #          headerStyle = list(color = "#d80b8c", fontSize = "16px")) -->
-<!--     colGroup(name = "", -->
-<!--              columns = c("SITE","DEPT_SPECIALTY_NAME","DEPARTMENT_NAME","PROV_NAME","Appt.MonthYear"), sticky = "left", -->
-<!--              headerStyle = list(fontSize = "16px")), -->
-<!--     colGroup(name = "Available Hours", -->
-<!--              columns = c("avail_hours_week", "sched_hours_week", "arrived_hours_week"), -->
-<!--              headerStyle = list(color = "#7f7f7f", fontSize = "16px")), -->
-<!--     colGroup(name = "Available Minutes by Day", -->
-<!--              columns = c("avg_avail_min_Mon","avg_avail_min_Tue","avg_avail_min_Wed","avg_avail_min_Thu","avg_avail_min_Fri"), -->
-<!--              headerStyle = list(color = "#212070", fontSize = "16px")), -->
-<!--     colGroup(name = "Scheduled Minutes by Day", -->
-<!--              columns = c("avg_sched_min_Mon","avg_sched_min_Tue","avg_sched_min_Wed","avg_sched_min_Thu","avg_sched_min_Fri"), -->
-<!--              headerStyle = list(color = "#d80b8c", fontSize = "16px")), -->
-<!--     colGroup(name = "Arrived Minutes by Day", -->
-<!--              columns = c("avg_arrived_min_Mon","avg_arrived_min_Tue","avg_arrived_min_Wed","avg_arrived_min_Thu","avg_arrived_min_Fri"), -->
-<!--              headerStyle = list(color = "#00aeef", fontSize = "16px")) -->
-<!--     ), -->
-
-<!--   columns = list( -->
-
-<!--     SITE = colDef( -->
-<!--       # footer = "Total", -->
-<!--       name = "Site", -->
-<!--       minWidth = 180), -->
-
-<!--     DEPT_SPECIALTY_NAME = colDef( -->
-<!--       name = "Specialty", -->
-<!--       minWidth = 180), -->
-
-<!--     DEPARTMENT_NAME = colDef( -->
-<!--       name = "Department", -->
-<!--       minWidth = 230), -->
-
-<!--     PROV_NAME = colDef( -->
-<!--       name = "Provider", -->
-<!--       minWidth = 180), -->
-
-<!--     Appt.MonthYear = colDef( -->
-<!--       name = "Month", -->
-<!--       minWidth = 90), -->
-
-<!--     avail_hours_week = colDef( -->
-<!--       name = "Available Hours per Week", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#7f7f7f", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     sched_hours_week = colDef( -->
-<!--       name = "Scheduled Hours per Week", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#7f7f7f", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     arrived_hours_week = colDef( -->
-<!--       name = "Arrived Hours per Week", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#7f7f7f", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_avail_min_Mon = colDef( -->
-<!--       name = "Mon", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_avail_min_Tue = colDef( -->
-<!--       name = "Tue", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_avail_min_Wed = colDef( -->
-<!--       name = "Wed", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_avail_min_Thu = colDef( -->
-<!--       name = "Thu", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_avail_min_Fri = colDef( -->
-<!--       name = "Fri", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_sched_min_Mon = colDef( -->
-<!--       name = "Mon", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_sched_min_Tue = colDef( -->
-<!--       name = "Tue", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_sched_min_Wed = colDef( -->
-<!--       name = "Wed", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_sched_min_Thu = colDef( -->
-<!--       name = "Thu", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_sched_min_Fri = colDef( -->
-<!--       name = "Fri", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_arrived_min_Mon = colDef( -->
-<!--       name = "Mon", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_arrived_min_Tue = colDef( -->
-<!--       name = "Tue", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_arrived_min_Wed = colDef( -->
-<!--       name = "Wed", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_arrived_min_Thu = colDef( -->
-<!--       name = "Thu", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_arrived_min_Fri = colDef( -->
-<!--       name = "Fri", -->
-<!--       maxWidth = 100, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     DEPARTMENT_ID = colDef(show =F), -->
-<!--     NPI = colDef(show =F), -->
-<!--     VISIT_PROV_STAFF_RESOURCE_C = colDef(show =F), -->
-<!--     avail_min = colDef(show =F), -->
-<!--     sched_min = colDef(show =F), -->
-<!--     arrived_min = colDef(show =F), -->
-<!--     held_min = colDef(show =F), -->
-<!--     private_min = colDef(show =F), -->
-<!--     avail_hours = colDef(show =F), -->
-<!--     sched_hours = colDef(show =F), -->
-<!--     arrived_hours = colDef(show =F), -->
-<!--     held_hours = colDef(show =F), -->
-<!--     private_hours = colDef(show =F), -->
-<!--     held_hours_week = colDef(show =F), -->
-<!--     private_hours_week = colDef(show =F), -->
-<!--     held_perc = colDef(show =F), -->
-<!--     private_perc = colDef(show =F), -->
-<!--     schedule_util = colDef(show =F), -->
-<!--     provider_util = colDef(show =F), -->
-<!--     avg_avail_min_Sat = colDef(show =F), -->
-<!--     avg_avail_min_Sun = colDef(show =F), -->
-<!--     avg_sched_min_Sat = colDef(show =F), -->
-<!--     avg_sched_min_Sun = colDef(show =F), -->
-<!--     avg_arrived_min_Sat = colDef(show =F), -->
-<!--     avg_arrived_min_Sun = colDef(show =F), -->
-<!--     avg_held_min_Mon = colDef(show =F), -->
-<!--     avg_held_min_Tue = colDef(show =F), -->
-<!--     avg_held_min_Wed = colDef(show =F), -->
-<!--     avg_held_min_Thu = colDef(show =F), -->
-<!--     avg_held_min_Fri = colDef(show =F), -->
-<!--     avg_held_min_Sat = colDef(show =F), -->
-<!--     avg_held_min_Sun = colDef(show =F), -->
-<!--     avg_private_min_Mon = colDef(show =F), -->
-<!--     avg_private_min_Tue = colDef(show =F), -->
-<!--     avg_private_min_Wed = colDef(show =F), -->
-<!--     avg_private_min_Thu = colDef(show =F), -->
-<!--     avg_private_min_Fri = colDef(show =F), -->
-<!--     avg_private_min_Sat = colDef(show =F), -->
-<!--     avg_private_min_Sun = colDef(show =F), -->
-<!--     avg_held_perc_Mon = colDef(show =F), -->
-<!--     avg_held_perc_Tue = colDef(show =F), -->
-<!--     avg_held_perc_Wed = colDef(show =F), -->
-<!--     avg_held_perc_Thu = colDef(show =F), -->
-<!--     avg_held_perc_Fri = colDef(show =F), -->
-<!--     avg_held_perc_Sat = colDef(show =F), -->
-<!--     avg_held_perc_Sun = colDef(show =F), -->
-<!--     avg_private_perc_Mon = colDef(show =F), -->
-<!--     avg_private_perc_Tue = colDef(show =F), -->
-<!--     avg_private_perc_Wed = colDef(show =F), -->
-<!--     avg_private_perc_Thu = colDef(show =F), -->
-<!--     avg_private_perc_Fri = colDef(show =F), -->
-<!--     avg_private_perc_Sat = colDef(show =F), -->
-<!--     avg_private_perc_Sun = colDef(show =F), -->
-<!--     avg_schedule_util_Mon = colDef(show =F), -->
-<!--     avg_schedule_util_Tue = colDef(show =F), -->
-<!--     avg_schedule_util_Wed = colDef(show =F), -->
-<!--     avg_schedule_util_Thu = colDef(show =F), -->
-<!--     avg_schedule_util_Fri = colDef(show =F), -->
-<!--     avg_schedule_util_Sat = colDef(show =F), -->
-<!--     avg_schedule_util_Sun = colDef(show =F), -->
-<!--     avg_provider_util_Mon = colDef(show =F), -->
-<!--     avg_provider_util_Tue = colDef(show =F), -->
-<!--     avg_provider_util_Wed = colDef(show =F), -->
-<!--     avg_provider_util_Thu = colDef(show =F), -->
-<!--     avg_provider_util_Fri = colDef(show =F), -->
-<!--     avg_provider_util_Sat = colDef(show =F), -->
-<!--     avg_provider_util_Sun = colDef(show =F) -->
-
-<!--   ) # Close Columns -->
-
-<!--   ) # Close Reactable -->
-
-<!--  # ) -->
-<!-- # ) -->
-
-
-<!-- ``` -->
-<!-- <br/> -->
-<!-- <br/> -->
-<!-- <br/> -->
-
-
-<!-- #### On-Hold Slots/Times -->
-<!-- <span style='font-size: 20px; font-weight:bold; font-style:italic; color: #212070'>*Excludes any templates with no scheduling activities; refer to "Unused Templates" section.</span><br/> -->
-<!-- ```{r Provider On Hold by Month Table Output, echo = FALSE, warning = FALSE, message = FALSE} -->
-
-
-<!-- # Table Output ----------------------------------------------------------------- -->
-<!-- # htmltools::browsable( -->
-<!-- #   tagList( -->
-<!-- #     tags$button( -->
-<!-- #       tagList(fontawesome::fa("download"), "Download Table"), -->
-<!-- #       onclick = "Reactable.downloadDataCSV('other-prov-download-table', 'Template Utilization')" -->
-<!-- #     ), -->
-
-<!-- # htmltools::browsable( -->
-<!-- #   tagList( -->
-<!-- #     div(tags$label("Group by", `for` = "cars-grouping-select")), -->
-<!-- #     tags$select( -->
-<!-- #       id = "cars-grouping-select", -->
-<!-- #       onchange = "Reactable.setGroupBy('cars-grouping-table', this.value ? [this.value] : [])", -->
-<!-- #       tags$option("None", value = c("Campus","Campus.Specialty.Group")), -->
-<!-- #       # tags$option("Test", value = c("Appt.Source.New","Campus.Specialty.Group")), -->
-<!-- #       # lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option) -->
-<!-- #       lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option) -->
-<!-- #     ), -->
-<!-- # -->
-<!-- #     tags$hr("aria-hidden" = "true"), -->
-
-<!-- reactable( -->
-<!--   utilization_output %>% -->
-<!--     filter(SITE %!in% c("MS NOW", "MSH- AMBULATORY CARE", "OTHER", "NYEE")) %>% -->
-<!--     filter(VISIT_PROV_STAFF_RESOURCE_C == 1), -->
-
-<!--   # elementId = "other-prov-download-table", -->
-<!--   # elementId = "cars-grouping-table", -->
-<!--   style = list(fontFamily = 'Calibri', -->
-<!--                  fontSize = '14px'), -->
-<!--     defaultColDef = colDef(align = "left", -->
-<!--                            headerStyle = list(fontWeight = "Bold", fontSize = "14px"), -->
-<!--                            headerClass = "bar-sort-header"), -->
-
-<!--     highlight = TRUE, -->
-<!--     # filterable = TRUE, -->
-<!--     pagination = FALSE, -->
-<!--     height = 700, -->
-<!--     wrap = TRUE, -->
-<!--   searchable = TRUE, -->
-
-<!--   # rowStyle = function(index) { -->
-<!--   #           if (index %in% c(10)) { -->
-<!--   #             list(`border-top` = "2px solid rgb(184,184,184)", -->
-<!--   #                  fontWeight = "Bold") -->
-<!--   #           } -->
-<!--   #         }, -->
-
-<!--   groupBy = c("SITE", "DEPT_SPECIALTY_NAME", "DEPARTMENT_NAME", "PROV_NAME"), -->
-
-<!--   columnGroups = list( -->
-<!--     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " Visit Volume"), -->
-<!--     #          columns = c("Total", "new_perc"), -->
-<!--     #          headerStyle = list(color = "#212070", fontSize = "16px")), -->
-<!--     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " No Show Rate"), -->
-<!--     #          columns = c("noShow_rate", "noShow_rate_Established", "noShow_rate_New"), -->
-<!--     #          headerStyle = list(color = "#d80b8c", fontSize = "16px")) -->
-<!--     colGroup(name = "", -->
-<!--              columns = c("SITE","DEPT_SPECIALTY_NAME","DEPARTMENT_NAME","PROV_NAME","Appt.MonthYear"), sticky = "left", -->
-<!--              headerStyle = list(fontSize = "16px")), -->
-<!--     colGroup(name = "Available Hours", -->
-<!--              columns = c("avail_hours_week"), -->
-<!--              headerStyle = list(color = "#7f7f7f", fontSize = "16px")), -->
-<!--     colGroup(name = "% On-Hold vs. Private Hours", -->
-<!--              columns = c("held_perc", "private_perc"), -->
-<!--              headerStyle = list(color = "#212070", fontSize = "16px")), -->
-<!--     colGroup(name = "% On-Hold Hours by Day", -->
-<!--              columns = c("avg_held_perc_Mon","avg_held_perc_Tue","avg_held_perc_Wed","avg_held_perc_Thu","avg_held_perc_Fri"), -->
-<!--              headerStyle = list(color = "#d80b8c", fontSize = "16px")), -->
-<!--     colGroup(name = "% Private Hours by Day", -->
-<!--              columns = c("avg_private_perc_Mon","avg_private_perc_Tue","avg_private_perc_Wed","avg_private_perc_Thu","avg_private_perc_Fri"), -->
-<!--              headerStyle = list(color = "#00aeef", fontSize = "16px")) -->
-<!--     ), -->
-
-<!--   columns = list( -->
-
-<!--     SITE = colDef( -->
-<!--       # footer = "Total", -->
-<!--       name = "Site", -->
-<!--       minWidth = 180), -->
-
-<!--     DEPT_SPECIALTY_NAME = colDef( -->
-<!--       name = "Specialty", -->
-<!--       minWidth = 180), -->
-
-<!--     DEPARTMENT_NAME = colDef( -->
-<!--       name = "Department", -->
-<!--       minWidth = 230), -->
-
-<!--     PROV_NAME = colDef( -->
-<!--       name = "Provider", -->
-<!--       minWidth = 180), -->
-
-<!--     Appt.MonthYear = colDef( -->
-<!--       name = "Month", -->
-<!--       minWidth = 90), -->
-
-<!--     avail_hours_week = colDef( -->
-<!--       name = "Available Hours per Week", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#7f7f7f", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     held_perc = colDef( -->
-<!--       name = "% On-Hold Hours", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalheld_min = 0 -->
-<!--         let totalavail_min = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalheld_min += row['held_min'] -->
-<!--           totalavail_min += row['avail_min'] -->
-<!--         }) -->
-<!--         return (totalheld_min) / totalavail_min || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 1), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     private_perc = colDef( -->
-<!--       name = "% Private Hours", -->
-<!--       maxWidth = 130, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalprivate_min = 0 -->
-<!--         let totalavail_min = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalprivate_min += row['private_min'] -->
-<!--           totalavail_min += row['avail_min'] -->
-<!--         }) -->
-<!--         return (totalprivate_min) / totalavail_min || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 1), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_held_perc_Mon = colDef( -->
-<!--       name = "Mon", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_held_min_Mon = 0 -->
-<!--         let totalavg_avail_min_Mon = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_held_min_Mon += row['avg_held_min_Mon'] -->
-<!--           totalavg_avail_min_Mon += row['avg_avail_min_Mon'] -->
-<!--         }) -->
-<!--         return (totalavg_held_min_Mon) / totalavg_avail_min_Mon || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_held_perc_Tue = colDef( -->
-<!--       name = "Tue", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_held_min_Tue = 0 -->
-<!--         let totalavg_avail_min_Tue = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_held_min_Tue += row['avg_held_min_Tue'] -->
-<!--           totalavg_avail_min_Tue += row['avg_avail_min_Tue'] -->
-<!--         }) -->
-<!--         return (totalavg_held_min_Tue) / totalavg_avail_min_Tue || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_held_perc_Wed = colDef( -->
-<!--       name = "Wed", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_held_min_Wed = 0 -->
-<!--         let totalavg_avail_min_Wed = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_held_min_Wed += row['avg_held_min_Wed'] -->
-<!--           totalavg_avail_min_Wed += row['avg_avail_min_Wed'] -->
-<!--         }) -->
-<!--         return (totalavg_held_min_Wed) / totalavg_avail_min_Wed || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_held_perc_Thu = colDef( -->
-<!--       name = "Thu", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_held_min_Thu = 0 -->
-<!--         let totalavg_avail_min_Thu = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_held_min_Thu += row['avg_held_min_Thu'] -->
-<!--           totalavg_avail_min_Thu += row['avg_avail_min_Thu'] -->
-<!--         }) -->
-<!--         return (totalavg_held_min_Thu) / totalavg_avail_min_Thu || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_held_perc_Fri = colDef( -->
-<!--       name = "Fri", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_held_min_Fri = 0 -->
-<!--         let totalavg_avail_min_Fri = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_held_min_Fri += row['avg_held_min_Fri'] -->
-<!--           totalavg_avail_min_Fri += row['avg_avail_min_Fri'] -->
-<!--         }) -->
-<!--         return (totalavg_held_min_Fri) / totalavg_avail_min_Fri || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_private_perc_Mon = colDef( -->
-<!--       name = "Mon", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_private_min_Mon = 0 -->
-<!--         let totalavg_avail_min_Mon = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_private_min_Mon += row['avg_private_min_Mon'] -->
-<!--           totalavg_avail_min_Mon += row['avg_avail_min_Mon'] -->
-<!--         }) -->
-<!--         return (totalavg_private_min_Mon) / totalavg_avail_min_Mon || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_private_perc_Tue = colDef( -->
-<!--       name = "Tue", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_private_min_Tue = 0 -->
-<!--         let totalavg_avail_min_Tue = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_private_min_Tue += row['avg_private_min_Tue'] -->
-<!--           totalavg_avail_min_Tue += row['avg_avail_min_Tue'] -->
-<!--         }) -->
-<!--         return (totalavg_private_min_Tue) / totalavg_avail_min_Tue || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_private_perc_Wed = colDef( -->
-<!--       name = "Wed", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_private_min_Wed = 0 -->
-<!--         let totalavg_avail_min_Wed = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_private_min_Wed += row['avg_private_min_Wed'] -->
-<!--           totalavg_avail_min_Wed += row['avg_avail_min_Wed'] -->
-<!--         }) -->
-<!--         return (totalavg_private_min_Wed) / totalavg_avail_min_Wed || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_private_perc_Thu = colDef( -->
-<!--       name = "Thu", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_private_min_Thu = 0 -->
-<!--         let totalavg_avail_min_Thu = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_private_min_Thu += row['avg_private_min_Thu'] -->
-<!--           totalavg_avail_min_Thu += row['avg_avail_min_Thu'] -->
-<!--         }) -->
-<!--         return (totalavg_private_min_Thu) / totalavg_avail_min_Thu || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     avg_private_perc_Fri = colDef( -->
-<!--       name = "Fri", -->
-<!--       maxWidth = 60, -->
-<!--       headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalavg_private_min_Fri = 0 -->
-<!--         let totalavg_avail_min_Fri = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalavg_private_min_Fri += row['avg_private_min_Fri'] -->
-<!--           totalavg_avail_min_Fri += row['avg_avail_min_Fri'] -->
-<!--         }) -->
-<!--         return (totalavg_private_min_Fri) / totalavg_avail_min_Fri || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-
-<!--     DEPARTMENT_ID = colDef(show =F), -->
-<!--     NPI = colDef(show =F), -->
-<!--     VISIT_PROV_STAFF_RESOURCE_C = colDef(show =F), -->
-<!--     avail_min = colDef(show =F), -->
-<!--     sched_min = colDef(show =F), -->
-<!--     arrived_min = colDef(show =F), -->
-<!--     held_min = colDef(show =F), -->
-<!--     private_min = colDef(show =F), -->
-<!--     avail_hours = colDef(show =F), -->
-<!--     sched_hours = colDef(show =F), -->
-<!--     arrived_hours = colDef(show =F), -->
-<!--     held_hours = colDef(show =F), -->
-<!--     sched_hours_week = colDef(show =F), -->
-<!--     arrived_hours_week = colDef(show =F), -->
-<!--     held_hours_week = colDef(show =F), -->
-<!--     private_hours_week = colDef(show =F), -->
-<!--     private_hours = colDef(show =F), -->
-<!--     schedule_util = colDef(show =F), -->
-<!--     provider_util = colDef(show =F), -->
-<!--     avg_avail_min_Mon = colDef(show =F), -->
-<!--     avg_avail_min_Tue = colDef(show =F), -->
-<!--     avg_avail_min_Wed = colDef(show =F), -->
-<!--     avg_avail_min_Thu = colDef(show =F), -->
-<!--     avg_avail_min_Fri = colDef(show =F), -->
-<!--     avg_avail_min_Sat = colDef(show =F), -->
-<!--     avg_avail_min_Sun = colDef(show =F), -->
-<!--     avg_sched_min_Mon = colDef(show =F), -->
-<!--     avg_sched_min_Tue = colDef(show =F), -->
-<!--     avg_sched_min_Wed = colDef(show =F), -->
-<!--     avg_sched_min_Thu = colDef(show =F), -->
-<!--     avg_sched_min_Fri = colDef(show =F), -->
-<!--     avg_sched_min_Sat = colDef(show =F), -->
-<!--     avg_sched_min_Sun = colDef(show =F), -->
-<!--     avg_arrived_min_Mon = colDef(show =F), -->
-<!--     avg_arrived_min_Tue = colDef(show =F), -->
-<!--     avg_arrived_min_Wed = colDef(show =F), -->
-<!--     avg_arrived_min_Thu = colDef(show =F), -->
-<!--     avg_arrived_min_Fri = colDef(show =F), -->
-<!--     avg_arrived_min_Sat = colDef(show =F), -->
-<!--     avg_arrived_min_Sun = colDef(show =F), -->
-<!--     avg_held_min_Mon = colDef(show =F), -->
-<!--     avg_held_min_Tue = colDef(show =F), -->
-<!--     avg_held_min_Wed = colDef(show =F), -->
-<!--     avg_held_min_Thu = colDef(show =F), -->
-<!--     avg_held_min_Fri = colDef(show =F), -->
-<!--     avg_held_min_Sat = colDef(show =F), -->
-<!--     avg_held_min_Sun = colDef(show =F), -->
-<!--     avg_private_min_Mon = colDef(show =F), -->
-<!--     avg_private_min_Tue = colDef(show =F), -->
-<!--     avg_private_min_Wed = colDef(show =F), -->
-<!--     avg_private_min_Thu = colDef(show =F), -->
-<!--     avg_private_min_Fri = colDef(show =F), -->
-<!--     avg_private_min_Sat = colDef(show =F), -->
-<!--     avg_private_min_Sun = colDef(show =F), -->
-<!--     avg_held_perc_Sat = colDef(show =F), -->
-<!--     avg_held_perc_Sun = colDef(show =F), -->
-<!--     avg_private_perc_Sat = colDef(show =F), -->
-<!--     avg_private_perc_Sun = colDef(show =F), -->
-<!--     avg_schedule_util_Mon = colDef(show =F), -->
-<!--     avg_schedule_util_Tue = colDef(show =F), -->
-<!--     avg_schedule_util_Wed = colDef(show =F), -->
-<!--     avg_schedule_util_Thu = colDef(show =F), -->
-<!--     avg_schedule_util_Fri = colDef(show =F), -->
-<!--     avg_schedule_util_Sat = colDef(show =F), -->
-<!--     avg_schedule_util_Sun = colDef(show =F), -->
-<!--     avg_provider_util_Mon = colDef(show =F), -->
-<!--     avg_provider_util_Tue = colDef(show =F), -->
-<!--     avg_provider_util_Wed = colDef(show =F), -->
-<!--     avg_provider_util_Thu = colDef(show =F), -->
-<!--     avg_provider_util_Fri = colDef(show =F), -->
-<!--     avg_provider_util_Sat = colDef(show =F), -->
-<!--     avg_provider_util_Sun = colDef(show =F) -->
-
-<!--   ) # Close Columns -->
-
-<!--   ) # Close Reactable -->
-
-<!--  # ) -->
-<!-- # ) -->
-
-
-<!-- ``` -->
-<!-- <br/> -->
-<!-- <br/> -->
-<!-- <br/> -->
-
-
-<!-- ### Unused Templates -->
-<!-- <span style='font-size: 20px; font-weight:bold; font-style:italic; color: #212070'>*This table shows a list of provider/resource templates currently open in Epic but with no scheduling activities.</span><br/> -->
-<!-- ```{r Unused Templates, echo = FALSE, warning = FALSE, message = FALSE} -->
-
-
-<!-- # Table Output ----------------------------------------------------------------- -->
-<!-- # htmltools::browsable( -->
-<!-- #   tagList( -->
-<!-- #     tags$button( -->
-<!-- #       tagList(fontawesome::fa("download"), "Download Table"), -->
-<!-- #       onclick = "Reactable.downloadDataCSV('unused-download-table', 'Unused Templates')" -->
-<!-- #     ), -->
-
-<!-- # htmltools::browsable( -->
-<!-- #   tagList( -->
-<!-- #     div(tags$label("Group by", `for` = "cars-grouping-select")), -->
-<!-- #     tags$select( -->
-<!-- #       id = "cars-grouping-select", -->
-<!-- #       onchange = "Reactable.setGroupBy('cars-grouping-table', this.value ? [this.value] : [])", -->
-<!-- #       tags$option("None", value = c("Campus","Campus.Specialty.Group")), -->
-<!-- #       # tags$option("Test", value = c("Appt.Source.New","Campus.Specialty.Group")), -->
-<!-- #       # lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option) -->
-<!-- #       lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option) -->
-<!-- #     ), -->
-<!-- # -->
-<!-- #     tags$hr("aria-hidden" = "true"), -->
-
-<!-- reactable( -->
-<!--   unused_templates %>% -->
-<!--     filter(SITE %!in% c("MS NOW", "MSH- AMBULATORY CARE", "OTHER", "NYEE")), -->
-
-<!--   elementId = "unused-download-table", -->
-<!--   # elementId = "cars-grouping-table", -->
-<!--   style = list(fontFamily = 'Calibri', -->
-<!--                  fontSize = '14px'), -->
-<!--     defaultColDef = colDef(align = "left", -->
-<!--                            headerStyle = list(fontWeight = "Bold", fontSize = "14px"), -->
-<!--                            headerClass = "bar-sort-header"), -->
-
-<!--     highlight = TRUE, -->
-<!--     # filterable = TRUE, -->
-<!--     pagination = FALSE, -->
-<!--     height = 700, -->
-<!--     wrap = TRUE, -->
-<!--   searchable = TRUE, -->
-
-<!--   # rowStyle = function(index) { -->
-<!--   #           if (index %in% c(10)) { -->
-<!--   #             list(`border-top` = "2px solid rgb(184,184,184)", -->
-<!--   #                  fontWeight = "Bold") -->
-<!--   #           } -->
-<!--   #         }, -->
-
-<!--   groupBy = c("SITE", "DEPT_SPECIALTY_NAME", "DEPARTMENT_NAME"), -->
-
-<!--   columns = list( -->
-
-<!--     SITE = colDef( -->
-<!--       # footer = "Total", -->
-<!--       name = "Site", -->
-<!--       minWidth = 180), -->
-
-<!--     DEPT_SPECIALTY_NAME = colDef( -->
-<!--       name = "Specialty", -->
-<!--       minWidth = 250), -->
-
-<!--     DEPARTMENT_NAME = colDef( -->
-<!--       name = "Department", -->
-<!--       minWidth = 250), -->
-
-<!--     PROV_NAME = colDef( -->
-<!--       name = "Provider", -->
-<!--       minWidth = 200), -->
-
-<!--     open_templates = colDef( -->
-<!--       name = "# Open Templates in Epic", -->
-<!--       minWidth = 300, -->
-<!--       headerStyle = list(background = "#7f7f7f", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = 'sum', -->
-<!--       format = colFormat(separators = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-<!--     unused_perc = colDef( -->
-<!--       name = "% Open but Unused Templates", -->
-<!--       minWidth = 300, -->
-<!--       headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"), -->
-<!--       aggregate = JS("function(values, rows) { -->
-<!--         let totalopen_templates = 0 -->
-<!--         let totalUnused = 0 -->
-<!--         rows.forEach(function(row) { -->
-<!--           totalopen_templates += row['open_templates'] -->
-<!--           totalUnused += row['Unused'] -->
-<!--         }) -->
-<!--         return (totalUnused) / totalopen_templates || '-' -->
-<!--       }"), -->
-<!--       format = colFormat(percent = TRUE, digits = 0), -->
-<!--       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)") -->
-<!--     ), -->
-
-
-<!--     Unused = colDef(show =F), -->
-<!--     Used = colDef(show =F) -->
-
-<!--   ) # Close Columns -->
-
-<!--   ) # Close Reactable -->
-
-<!-- #  ) # Close tagList -->
-<!-- # ) # Close htmltools -->
-
-
-
-<!-- ``` -->
-
