@@ -468,7 +468,7 @@ htmltools::browsable(
 reactable(
   slot_util_summary %>%
     filter(CAMPUS %!in% c("MSH- AMBULATORY CARE", "NYEE")) %>%
-    mutate(MSHS = "MSHS Total") %>%
+    mutate(MSHS = "MSHS") %>%
     arrange(CAMPUS, DEPT_SPECIALTY_NAME, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR),
   
   elementId = "template-util-table",
