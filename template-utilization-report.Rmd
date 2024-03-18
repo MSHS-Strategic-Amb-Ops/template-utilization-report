@@ -511,11 +511,11 @@ reactable(
     colGroup(name = "Overall Utilization", 
              columns = c("sched_util","prov_util"),
              headerStyle = list(color = "#212070", fontSize = "16px")),
-    colGroup(name = "Schedule Utiliation by Day", 
+    colGroup(name = "Schedule Utilization by Day", 
              columns = c("sched_util_day_MON", "sched_util_day_TUE", "sched_util_day_WED", "sched_util_day_THU", "sched_util_day_FRI",
                          "sched_util_day_SAT"),
              headerStyle = list(color = "#d80b8c", fontSize = "16px")),
-    colGroup(name = "Provider Utiliation by Day", 
+    colGroup(name = "Provider Utilization by Day", 
              columns = c("prov_util_day_MON", "prov_util_day_TUE", "prov_util_day_WED", "prov_util_day_THU", "prov_util_day_FRI",
                          "prov_util_day_SAT"),
              headerStyle = list(color = "#00aeef", fontSize = "16px"))
