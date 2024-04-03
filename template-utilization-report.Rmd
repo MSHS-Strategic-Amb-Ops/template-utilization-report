@@ -443,7 +443,6 @@ knitr::include_graphics("Mount_Sinai_Logo_H.png")
 *Report run date: `r report_run_date`*<br/>
 *Report data range: Includes templates from `r start_date` to `r end_date`*<br/>
 *Excludes Non-Epic Scheduling Sites: MSH-AMBULATORY CARE, NYEE*<br/>
-*Includes Providers Only (Defined in EPIC as VISIT_PROV_STAFF_RESOURCE_C = 1)*<br/>
 _________________________________________________________________________________________________________________________________________________________
 <br/>
 <br/>
