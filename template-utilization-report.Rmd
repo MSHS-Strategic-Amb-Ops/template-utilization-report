@@ -452,7 +452,7 @@ ________________________________________________________________________________
 ## MSHS {.tabset .tabset-fade .tabset-pills}
 ### TEMPLATE UTILIZATION (Physicians Only)
 #### Includes Physician, Fellow, Resident, Dentist, Physician Assistant, and Nurse Practitioner
-```{r Utilization by Month Table Output, echo = FALSE, warning = FALSE, message = FALSE}
+```{r Utilization by Month Table Output Provider Only, echo = FALSE, warning = FALSE, message = FALSE}
 
 
 # Table Output -----------------------------------------------------------------
