@@ -455,12 +455,12 @@ ________________________________________________________________________________
 
 
 # Table Output -----------------------------------------------------------------
-# htmltools::browsable(
-#   tagList(
-#     tags$button(
-#       tagList(fontawesome::fa("download"), "Download Table"),
-#       onclick = "Reactable.downloadDataCSV('util-download-table', 'Template Utilization')"
-#     ),
+htmltools::browsable(
+  tagList(
+    tags$button(
+      tagList(fontawesome::fa("download"), "Download Table"),
+      onclick = "Reactable.downloadDataCSV('template-util-table', 'Template Utilization')"
+    ),
 
 # htmltools::browsable(
 #   tagList(
@@ -484,7 +484,7 @@ reactable(
     mutate(MSHS = "MSHS") %>%
     arrange(CAMPUS, DEPT_SPECIALTY_NAME, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR),
   
-  # elementId = "template-util-table",
+  elementId = "template-util-table",
   # elementId = "cars-grouping-table",
   style = list(fontFamily = 'Calibri',
                  fontSize = '14px'),
@@ -847,8 +847,8 @@ reactable(
 
   ) # Close Reactable
 
-#  ) # Close tagList
-# ) # Close htmltools
+ ) # Close tagList
+) # Close htmltools
 
 
 ```
@@ -862,12 +862,12 @@ reactable(
 
 
 # Table Output -----------------------------------------------------------------
-# htmltools::browsable(
-#   tagList(
-#     tags$button(
-#       tagList(fontawesome::fa("download"), "Download Table"),
-#       onclick = "Reactable.downloadDataCSV('util-download-table', 'Template Utilization')"
-#     ),
+htmltools::browsable(
+  tagList(
+    tags$button(
+      tagList(fontawesome::fa("download"), "Download Table"),
+      onclick = "Reactable.downloadDataCSV('template-util-all-table', 'Template Utilization')"
+    ),
 
 # htmltools::browsable(
 #   tagList(
@@ -890,7 +890,7 @@ reactable(
     mutate(MSHS = "MSHS") %>%
     arrange(CAMPUS, DEPT_SPECIALTY_NAME, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR),
   
-  # elementId = "template-util-table",
+  elementId = "template-util-all-table",
   # elementId = "cars-grouping-table",
   style = list(fontFamily = 'Calibri',
                  fontSize = '14px'),
@@ -1253,8 +1253,8 @@ reactable(
 
   ) # Close Reactable
 
-#  ) # Close tagList
-# ) # Close htmltools
+ ) # Close tagList
+) # Close htmltools
 
 
 ```
