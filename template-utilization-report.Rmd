@@ -362,7 +362,17 @@ coverage_tbl <- tbl(conn2, "V_PAT_ENC_COVERAGE")
 clarity_ser_tbl <- tbl(conn2, "CLARITY_SER")
 
 
-slot_view_tbl <- tbl(conn1, in_schema("OAO_PRODUCTION", "AMBULATORY_SLOT_TABLE_VIEW"))
+# slot_view_tbl <- tbl(conn1, in_schema("OAO_PRODUCTION", "AMBULATORY_SLOT_TABLE"))
+
+
+conn3 <- dbPool(drv = odbc(), dsn = "OAO Cloud DB Staging", timeout = 30)
+slot_view_tbl <- tbl(conn3, in_schema("OAO_DEVELOPMENT", "AMBULATORY_SLOT_TABLE"))
+
+
+# poolcon_upt <- dbConnect(odbc(), "OAO Cloud DB Staging", timeout = 15)
+# slot_table_query <- glue("SELECT * FROM AMBULATORY_SLOT_TABLE;")
+# slot_table_result <- dbGetQuery(poolcon_upt, slot_table_query)
+# slot_view_tbl <- slot_table_query
 
 ```
 
@@ -373,11 +383,11 @@ slot_util_month <- slot_view_tbl %>%
   mutate(slot_year = year(SLOT_DATE)) %>%
   filter(SLOT_DATE >= TO_DATE(start_date, "YYYY-MM-DD HH24:MI:SS")) %>%
   filter(SLOT_DATE <= TO_DATE(end_date, "YYYY-MM-DD HH24:MI:SS")) %>%
-  group_by(CAMPUS, DEPT_SPECIALTY_NAME, DEPARTMENT, PROV_ID, PROVIDER, SLOT_MONTH_YEAR, APPT_WEEK) %>%
-  summarise(avail_hours = sum(AVAILABLE_HOURS, na.rm = T),
-            sched_hours = sum(SCHEDULED_HOURS, na.rm = T),
-            arrived_hours = sum(ARRIVED_HOURS, na.rm = T)) %>%
-  group_by(CAMPUS, DEPT_SPECIALTY_NAME, DEPARTMENT, PROV_ID, PROVIDER, SLOT_MONTH_YEAR) %>%
+  group_by(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROV_ID, PROVIDER, SLOT_MONTH_YEAR, APPT_WEEK) %>%
+  summarise(avail_hours = sum(AVAILABLE_MINS, na.rm = T)/60,
+            sched_hours = sum(SCHEDULED_MINS, na.rm = T)/60,
+            arrived_hours = sum(ARRIVED_MINS, na.rm = T)/60) %>%
+  group_by(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROV_ID, PROVIDER, SLOT_MONTH_YEAR) %>%
   summarise(avail_hours = sum(avail_hours, na.rm = T),
             avail_hours_week = mean(avail_hours, na.rm = T),
             sched_hours = sum(sched_hours, na.rm = T),
@@ -397,12 +407,12 @@ slot_util_day <- slot_view_tbl %>%
   mutate(slot_year = year(SLOT_DATE)) %>%
   filter(SLOT_DATE >= TO_DATE(start_date, "YYYY-MM-DD HH24:MI:SS")) %>%
   filter(SLOT_DATE <= TO_DATE(end_date, "YYYY-MM-DD HH24:MI:SS")) %>%
-  group_by(CAMPUS, DEPT_SPECIALTY_NAME, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR, APPT_DAY) %>%
-  summarise(avail_hours_day = sum(AVAILABLE_HOURS, na.rm = T),
-            sched_hours_day = sum(SCHEDULED_HOURS, na.rm = T),
-            arrived_hours_day = sum(ARRIVED_HOURS, na.rm = T),
-            sched_util_day = sum(SCHEDULED_HOURS)/sum(AVAILABLE_HOURS),
-            prov_util_day = sum(ARRIVED_HOURS)/sum(SCHEDULED_HOURS)) %>%
+  group_by(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR, APPT_DAY) %>%
+  summarise(avail_hours_day = sum(AVAILABLE_MINS, na.rm = T)/60,
+            sched_hours_day = sum(SCHEDULED_MINS, na.rm = T)/60,
+            arrived_hours_day = sum(ARRIVED_MINS, na.rm = T)/60,
+            sched_util_day = (sum(SCHEDULED_MINS)/sum(AVAILABLE_MINS))/60,
+            prov_util_day = (sum(ARRIVED_MINS)/sum(SCHEDULED_MINS))/60) %>%
   pivot_wider(names_from = APPT_DAY,
               values_from = avail_hours_day:prov_util_day) %>%
   collect()
@@ -417,7 +427,7 @@ slot_util_summary <- slot_util_summary %>%
 
 
 slot_util_summary <- slot_util_summary %>%
-  dplyr::select(CAMPUS, DEPT_SPECIALTY_NAME, DEPARTMENT, PROVIDER, PROV_TYPE, SLOT_MONTH_YEAR,
+  dplyr::select(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, PROV_TYPE, SLOT_MONTH_YEAR,
                 avail_hours, avail_hours_week, sched_hours, arrived_hours, 
                 sched_util, prov_util,
                 avail_hours_day_MON, avail_hours_day_TUE, avail_hours_day_WED, avail_hours_day_THU, avail_hours_day_FRI,
@@ -468,7 +478,7 @@ htmltools::browsable(
 #     tags$select(
 #       id = "template-util-select",
 #       onchange = "Reactable.setGroupBy('template-util-table', this.value ? [this.value] : [])",
-#       tags$option("None", value = c("CAMPUS","DEPT_SPECIALTY_NAME","DEPARTMENT","PROVIDER")),
+#       tags$option("None", value = c("CAMPUS","CAMPUS_SPECIALTY","DEPARTMENT","PROVIDER")),
 #       # tags$option("Test", value = c("Appt.Source.New","Campus.Specialty.Group")),
 #       # lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option)
 #       lapply(c("Site","Specialty","Department","Provider"), tags$option)
@@ -482,7 +492,7 @@ reactable(
     filter(!is.na(CAMPUS)) %>%
     filter(PROV_TYPE %in% c("Physician", "Resident", "Fellow", "Dentist")) %>%
     mutate(MSHS = "MSHS") %>%
-    arrange(CAMPUS, DEPT_SPECIALTY_NAME, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR),
+    arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR),
   
   elementId = "template-util-table",
   # elementId = "cars-grouping-table",
@@ -506,7 +516,7 @@ reactable(
   #           }
   #         },
 
-  groupBy = c("MSHS", "CAMPUS", "DEPT_SPECIALTY_NAME", "DEPARTMENT", "PROVIDER", "PROV_TYPE", "SLOT_MONTH_YEAR"),
+  groupBy = c("MSHS", "CAMPUS", "CAMPUS_SPECIALTY", "DEPARTMENT", "PROVIDER", "PROV_TYPE", "SLOT_MONTH_YEAR"),
 
   columnGroups = list(
     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " Visit Volume"), 
@@ -516,7 +526,7 @@ reactable(
     #          columns = c("noShow_rate", "noShow_rate_Established", "noShow_rate_New"),
     #          headerStyle = list(color = "#d80b8c", fontSize = "16px"))
     colGroup(name = "", 
-             columns = c("MSHS", "CAMPUS", "DEPT_SPECIALTY_NAME", "DEPARTMENT", "PROVIDER", "PROV_TYPE", "SLOT_MONTH_YEAR"), sticky = "left", 
+             columns = c("MSHS", "CAMPUS", "CAMPUS_SPECIALTY", "DEPARTMENT", "PROVIDER", "PROV_TYPE", "SLOT_MONTH_YEAR"), sticky = "left", 
              headerStyle = list(fontSize = "16px")),
     colGroup(name = "Available Hours", 
              columns = c("avail_hours","avail_hours_week"),
@@ -545,7 +555,7 @@ reactable(
       name = "Site",
       minWidth = 140),
 
-    DEPT_SPECIALTY_NAME = colDef(
+    CAMPUS_SPECIALTY = colDef(
       name = "Specialty",
       minWidth = 180),
     
@@ -875,7 +885,7 @@ htmltools::browsable(
 #     tags$select(
 #       id = "template-util-select",
 #       onchange = "Reactable.setGroupBy('template-util-table', this.value ? [this.value] : [])",
-#       tags$option("None", value = c("CAMPUS","DEPT_SPECIALTY_NAME","DEPARTMENT","PROVIDER")),
+#       tags$option("None", value = c("CAMPUS","CAMPUS_SPECIALTY","DEPARTMENT","PROVIDER")),
 #       # tags$option("Test", value = c("Appt.Source.New","Campus.Specialty.Group")),
 #       # lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option)
 #       lapply(c("Site","Specialty","Department","Provider"), tags$option)
@@ -888,7 +898,7 @@ reactable(
     filter(CAMPUS %!in% c("MSH- AMBULATORY CARE", "NYEE", "OTHER", "MS NOW", "MSHP")) %>%
     filter(!is.na(CAMPUS)) %>%
     mutate(MSHS = "MSHS") %>%
-    arrange(CAMPUS, DEPT_SPECIALTY_NAME, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR),
+    arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR),
   
   elementId = "template-util-all-table",
   # elementId = "cars-grouping-table",
@@ -912,7 +922,7 @@ reactable(
   #           }
   #         },
 
-  groupBy = c("MSHS", "CAMPUS", "DEPT_SPECIALTY_NAME", "DEPARTMENT", "PROV_TYPE", "PROVIDER", "SLOT_MONTH_YEAR"),
+  groupBy = c("MSHS", "CAMPUS", "CAMPUS_SPECIALTY", "DEPARTMENT", "PROV_TYPE", "PROVIDER", "SLOT_MONTH_YEAR"),
 
   columnGroups = list(
     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " Visit Volume"), 
@@ -922,7 +932,7 @@ reactable(
     #          columns = c("noShow_rate", "noShow_rate_Established", "noShow_rate_New"),
     #          headerStyle = list(color = "#d80b8c", fontSize = "16px"))
     colGroup(name = "", 
-             columns = c("MSHS", "CAMPUS", "DEPT_SPECIALTY_NAME", "DEPARTMENT", "PROV_TYPE", "PROVIDER", "SLOT_MONTH_YEAR"), sticky = "left", 
+             columns = c("MSHS", "CAMPUS", "CAMPUS_SPECIALTY", "DEPARTMENT", "PROV_TYPE", "PROVIDER", "SLOT_MONTH_YEAR"), sticky = "left", 
              headerStyle = list(fontSize = "16px")),
     colGroup(name = "Available Hours", 
              columns = c("avail_hours","avail_hours_week"),
@@ -951,7 +961,7 @@ reactable(
       name = "Site",
       minWidth = 140),
 
-    DEPT_SPECIALTY_NAME = colDef(
+    CAMPUS_SPECIALTY = colDef(
       name = "Specialty",
       minWidth = 180),
     
