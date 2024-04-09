@@ -345,6 +345,7 @@ date_1 <- paste0(format(as.Date(Sys.Date())+1, "%Y-%m-%d"), " 00:00:00")
 
 # Connection to Oracle DB ------------------------------------------------------
 conn1 <- dbPool(drv = odbc(), dsn = "OAO Cloud DB SoYoun", timeout = 30)
+conn3 <- dbPool(drv = odbc(), dsn = "OAO Cloud DB Production", timeout = 30)
 conn2 <- dbConnect(odbc(), 
                   "Clarity_prod", 
                   uid = "kweons01" , 
@@ -362,11 +363,12 @@ coverage_tbl <- tbl(conn2, "V_PAT_ENC_COVERAGE")
 clarity_ser_tbl <- tbl(conn2, "CLARITY_SER")
 
 
-# slot_view_tbl <- tbl(conn1, in_schema("OAO_PRODUCTION", "AMBULATORY_SLOT_TABLE"))
+slot_view_tbl <- tbl(conn3, in_schema("OAO_PRODUCTION", "AMBULATORY_SLOT_TABLE"))
 
 
-conn3 <- dbPool(drv = odbc(), dsn = "OAO Cloud DB Staging", timeout = 30)
-slot_view_tbl <- tbl(conn3, in_schema("OAO_DEVELOPMENT", "AMBULATORY_SLOT_TABLE"))
+
+# conn3 <- dbPool(drv = odbc(), dsn = "OAO Cloud DB Staging", timeout = 30)
+# slot_view_tbl <- tbl(conn3, in_schema("OAO_DEVELOPMENT", "AMBULATORY_SLOT_TABLE"))
 
 
 # poolcon_upt <- dbConnect(odbc(), "OAO Cloud DB Staging", timeout = 15)
