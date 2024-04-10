@@ -328,7 +328,7 @@ report_run_date <- Sys.Date()
 # start_date <- format(as.Date("2023-01-01"), "%Y-%m-%d")
 
 end_date <- format(as.Date(Sys.Date()-1), "%Y-%m-%d") 
-start_date <- paste0(format(as.Date(end_date) %m-% months(6), "%Y-%m"),"-01")
+start_date <- paste0(format(as.Date(end_date) %m-% months(3), "%Y-%m"),"-01")
 
 
 
@@ -471,7 +471,7 @@ htmltools::browsable(
   tagList(
     tags$button(
       tagList(fontawesome::fa("download"), "Download Table"),
-      onclick = "Reactable.downloadDataCSV('template-util-table', 'Template Utilization')"
+      onclick = "Reactable.downloadDataCSV('template-util-table', 'Template Utilization (Physicians)')"
     ),
 
 # htmltools::browsable(
@@ -494,7 +494,20 @@ reactable(
     filter(!is.na(CAMPUS)) %>%
     filter(PROV_TYPE %in% c("Physician", "Resident", "Fellow", "Dentist", "Physician Assistant", "Nurse Practitioner")) %>%
     mutate(MSHS = "MSHS") %>%
-    arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR),
+    arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER) %>%
+    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, PROV_TYPE, SLOT_MONTH_YEAR,
+                avail_hours, avail_hours_week, sched_hours, arrived_hours, 
+                sched_util, prov_util,
+                avail_hours_day_MON, avail_hours_day_TUE, avail_hours_day_WED, avail_hours_day_THU, avail_hours_day_FRI,
+                avail_hours_day_SAT,
+                sched_hours_day_MON, sched_hours_day_TUE, sched_hours_day_WED, sched_hours_day_THU, sched_hours_day_FRI,
+                sched_hours_day_SAT,
+                arrived_hours_day_MON, arrived_hours_day_TUE, arrived_hours_day_WED, arrived_hours_day_THU, arrived_hours_day_FRI,
+                arrived_hours_day_SAT,
+                sched_util_day_MON, sched_util_day_TUE, sched_util_day_WED, sched_util_day_THU, sched_util_day_FRI,
+                sched_util_day_SAT,
+                prov_util_day_MON, prov_util_day_TUE, prov_util_day_WED, prov_util_day_THU, prov_util_day_FRI,
+                prov_util_day_SAT),
   
   elementId = "template-util-table",
   # elementId = "cars-grouping-table",
@@ -518,7 +531,7 @@ reactable(
   #           }
   #         },
 
-  groupBy = c("MSHS", "CAMPUS", "CAMPUS_SPECIALTY", "DEPARTMENT", "PROVIDER", "PROV_TYPE", "SLOT_MONTH_YEAR"),
+  groupBy = c("MSHS", "CAMPUS", "CAMPUS_SPECIALTY", "DEPARTMENT", "PROVIDER"),
 
   columnGroups = list(
     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " Visit Volume"), 
@@ -869,7 +882,7 @@ reactable(
 <br/>
 
 
-### TEMPLATE UTILIZATION (All)
+### TEMPLATE UTILIZATION (Other)
 ```{r Utilization by Month Table Output, echo = FALSE, warning = FALSE, message = FALSE}
 
 
@@ -878,7 +891,7 @@ htmltools::browsable(
   tagList(
     tags$button(
       tagList(fontawesome::fa("download"), "Download Table"),
-      onclick = "Reactable.downloadDataCSV('template-util-all-table', 'Template Utilization')"
+      onclick = "Reactable.downloadDataCSV('template-util-all-table', 'Template Utilization (Other)')"
     ),
 
 # htmltools::browsable(
@@ -899,8 +912,22 @@ reactable(
   slot_util_summary %>%
     filter(CAMPUS %!in% c("MSH- AMBULATORY CARE", "NYEE", "OTHER", "MS NOW", "MSHP")) %>%
     filter(!is.na(CAMPUS)) %>%
+    filter(PROV_TYPE %!in% c("Physician", "Resident", "Fellow", "Dentist", "Physician Assistant", "Nurse Practitioner")) %>%
     mutate(MSHS = "MSHS") %>%
-    arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR),
+    arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR) %>%
+    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, PROV_TYPE, SLOT_MONTH_YEAR,
+                avail_hours, avail_hours_week, sched_hours, arrived_hours, 
+                sched_util, prov_util,
+                avail_hours_day_MON, avail_hours_day_TUE, avail_hours_day_WED, avail_hours_day_THU, avail_hours_day_FRI,
+                avail_hours_day_SAT,
+                sched_hours_day_MON, sched_hours_day_TUE, sched_hours_day_WED, sched_hours_day_THU, sched_hours_day_FRI,
+                sched_hours_day_SAT,
+                arrived_hours_day_MON, arrived_hours_day_TUE, arrived_hours_day_WED, arrived_hours_day_THU, arrived_hours_day_FRI,
+                arrived_hours_day_SAT,
+                sched_util_day_MON, sched_util_day_TUE, sched_util_day_WED, sched_util_day_THU, sched_util_day_FRI,
+                sched_util_day_SAT,
+                prov_util_day_MON, prov_util_day_TUE, prov_util_day_WED, prov_util_day_THU, prov_util_day_FRI,
+                prov_util_day_SAT),
   
   elementId = "template-util-all-table",
   # elementId = "cars-grouping-table",
@@ -924,7 +951,7 @@ reactable(
   #           }
   #         },
 
-  groupBy = c("MSHS", "CAMPUS", "CAMPUS_SPECIALTY", "DEPARTMENT", "PROV_TYPE", "PROVIDER", "SLOT_MONTH_YEAR"),
+  groupBy = c("MSHS", "CAMPUS", "CAMPUS_SPECIALTY", "DEPARTMENT", "PROV_TYPE"),
 
   columnGroups = list(
     # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " Visit Volume"), 
