@@ -494,7 +494,7 @@ reactable(
     filter(!is.na(CAMPUS)) %>%
     filter(PROV_TYPE %in% c("Physician", "Resident", "Fellow", "Dentist", "Physician Assistant", "Nurse Practitioner")) %>%
     mutate(MSHS = "MSHS") %>%
-    arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER) %>%
+    arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR) %>%
     dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, PROV_TYPE, SLOT_MONTH_YEAR,
                 avail_hours, avail_hours_week, sched_hours, arrived_hours, 
                 sched_util, prov_util,
