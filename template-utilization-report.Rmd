@@ -354,7 +354,7 @@ conn4 <- dbPool(drv = odbc(), dsn = "OAO Cloud DB Staging", timeout = 30)
 
 # Import Slot Availability Data ------------------------------------------------
 slot_raw_tbl <- tbl(conn2, "Y_DM_BOOKED_FILLED_RATE")
-access_raw_tbl <- tbl(conn2, "MV_DM_PATIENT_ACCESS")
+access_raw_tbl <- tbl(conn1, "MV_DM_PATIENT_ACCESS")
 availability_raw_tbl <- tbl(conn2, "V_AVAILABILITY")
 block_raw_tbl <- tbl(conn2, "AVAIL_BLOCK")
 block_name_tbl <- tbl(conn2, "ZC_APPT_BLOCK")
@@ -362,15 +362,13 @@ orders_raw_tbl <- tbl(conn2, "ORDER_PROC")
 coverage_tbl <- tbl(conn2, "V_PAT_ENC_COVERAGE")
 clarity_ser_tbl <- tbl(conn2, "CLARITY_SER")
 
-
 slot_view_tbl <- tbl(conn3, in_schema("OAO_PRODUCTION", "AMBULATORY_SLOT_TABLE"))
-
+# 
 # temp_slot_tbl <- tbl(conn4, "AMBULATORY_SLOT_TABLE_TEMP")
 # 
 # temp_slot <- temp_slot_tbl %>%
 #   head(10) %>%
 #   collect()
-
 
 ```
 
@@ -458,8 +456,8 @@ ________________________________________________________________________________
 
 ## MSHS {.tabset .tabset-fade .tabset-pills}
 ### TEMPLATE UTILIZATION (Physicians Only)
-#### Includes Physician, Fellow, Resident, Dentist, Physician Assistant, and Nurse Practitioner
-```{r Utilization by Month Table Output Provider Only, echo = FALSE, warning = FALSE, message = FALSE}
+#### Includes Physicians 
+```{r Utilization by Month Table Output Physicians Only, echo = FALSE, warning = FALSE, message = FALSE}
 
 
 # Table Output -----------------------------------------------------------------
@@ -467,7 +465,429 @@ htmltools::browsable(
   tagList(
     tags$button(
       tagList(fontawesome::fa("download"), "Download Table"),
-      onclick = "Reactable.downloadDataCSV('template-util-table', 'Template Utilization (Physicians)')"
+      onclick = "Reactable.downloadDataCSV('template-util-physicians-table', 'Template Utilization (Physicians)')"
+    ),
+
+# htmltools::browsable(
+#   tagList(
+#     div(tags$label("Group by", `for` = "template-util-select")),
+#     tags$select(
+#       id = "template-util-select",
+#       onchange = "Reactable.setGroupBy('template-util-table', this.value ? [this.value] : [])",
+#       tags$option("None", value = c("CAMPUS","CAMPUS_SPECIALTY","DEPARTMENT","PROVIDER")),
+#       # tags$option("Test", value = c("Appt.Source.New","Campus.Specialty.Group")),
+#       # lapply(c("Campus", "Campus.Specialty.Group", "Appt.Source.New"), tags$option)
+#       lapply(c("Site","Specialty","Department","Provider"), tags$option)
+#     ),
+# 
+#     tags$hr("aria-hidden" = "true"),
+
+reactable(
+  slot_util_summary %>%
+    filter(CAMPUS %!in% c("MSH- AMBULATORY CARE", "NYEE", "OTHER", "MS NOW", "MSHP")) %>%
+    filter(!is.na(CAMPUS)) %>%
+    filter(PROV_TYPE %in% c("Physician")) %>%
+    mutate(MSHS = "MSHS") %>%
+    arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR) %>%
+    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, SLOT_MONTH_YEAR,
+                avail_hours, avail_hours_week, sched_hours, arrived_hours, 
+                sched_util, prov_util,
+                avail_hours_day_MON, avail_hours_day_TUE, avail_hours_day_WED, avail_hours_day_THU, avail_hours_day_FRI,
+                avail_hours_day_SAT,
+                sched_hours_day_MON, sched_hours_day_TUE, sched_hours_day_WED, sched_hours_day_THU, sched_hours_day_FRI,
+                sched_hours_day_SAT,
+                arrived_hours_day_MON, arrived_hours_day_TUE, arrived_hours_day_WED, arrived_hours_day_THU, arrived_hours_day_FRI,
+                arrived_hours_day_SAT,
+                sched_util_day_MON, sched_util_day_TUE, sched_util_day_WED, sched_util_day_THU, sched_util_day_FRI,
+                sched_util_day_SAT,
+                prov_util_day_MON, prov_util_day_TUE, prov_util_day_WED, prov_util_day_THU, prov_util_day_FRI,
+                prov_util_day_SAT),
+  
+  elementId = "template-util-physicians-table",
+  # elementId = "cars-grouping-table",
+  style = list(fontFamily = 'Calibri',
+                 fontSize = '14px'),
+    defaultColDef = colDef(align = "left",
+                           headerStyle = list(fontWeight = "Bold", fontSize = "14px"),
+                           headerClass = "bar-sort-header"),
+  
+    highlight = TRUE,
+    # filterable = TRUE,
+    pagination = FALSE,
+    height = 800,
+    wrap = TRUE,
+  searchable = TRUE,
+  
+  # rowStyle = function(index) {
+  #           if (index %in% c(10)) {
+  #             list(`border-top` = "2px solid rgb(184,184,184)",
+  #                  fontWeight = "Bold")
+  #           }
+  #         },
+
+  groupBy = c("MSHS", "CAMPUS", "CAMPUS_SPECIALTY", "DEPARTMENT", "PROVIDER"),
+
+  columnGroups = list(
+    # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " Visit Volume"), 
+    #          columns = c("Total", "new_perc"),
+    #          headerStyle = list(color = "#212070", fontSize = "16px")),
+    # colGroup(name = paste0(format(as.Date(start_date), "%b"),"-",format(as.Date(end_date), "%b %Y"), " No Show Rate"), 
+    #          columns = c("noShow_rate", "noShow_rate_Established", "noShow_rate_New"),
+    #          headerStyle = list(color = "#d80b8c", fontSize = "16px"))
+    colGroup(name = "", 
+             columns = c("MSHS", "CAMPUS", "CAMPUS_SPECIALTY", "DEPARTMENT", "PROVIDER", "PROV_TYPE", "SLOT_MONTH_YEAR"), sticky = "left", 
+             headerStyle = list(fontSize = "16px")),
+    colGroup(name = "Available Hours", 
+             columns = c("avail_hours","avail_hours_week"),
+             headerStyle = list(color = "#7f7f7f", fontSize = "16px")),
+    colGroup(name = "Overall Utilization", 
+             columns = c("sched_util","prov_util"),
+             headerStyle = list(color = "#212070", fontSize = "16px")),
+    colGroup(name = "Schedule Utilization by Day", 
+             columns = c("sched_util_day_MON", "sched_util_day_TUE", "sched_util_day_WED", "sched_util_day_THU", "sched_util_day_FRI",
+                         "sched_util_day_SAT"),
+             headerStyle = list(color = "#d80b8c", fontSize = "16px")),
+    colGroup(name = "Provider Utilization by Day", 
+             columns = c("prov_util_day_MON", "prov_util_day_TUE", "prov_util_day_WED", "prov_util_day_THU", "prov_util_day_FRI",
+                         "prov_util_day_SAT"),
+             headerStyle = list(color = "#00aeef", fontSize = "16px"))
+    ),
+
+  columns = list(
+
+    MSHS = colDef(
+      # footer = "Total",
+      minWidth = 140),
+    
+    CAMPUS = colDef(
+      # footer = "Total",
+      name = "Site",
+      minWidth = 140),
+
+    CAMPUS_SPECIALTY = colDef(
+      name = "Specialty",
+      minWidth = 180),
+    
+    DEPARTMENT = colDef(
+      name = "Department",
+      minWidth = 240),
+    
+    PROVIDER = colDef(
+      name = "Provider",
+      minWidth = 200),
+    
+    PROV_TYPE = colDef(
+      name = "Type",
+      minWidth = 200),
+    
+    SLOT_MONTH_YEAR = colDef(
+      name = "Month",
+      minWidth = 110),
+    
+    avail_hours = colDef(
+      name = "Available Hours",
+      maxWidth = 130,
+      headerStyle = list(background = "#7f7f7f", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = 'sum',
+      format = colFormat(separators = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+    
+    avail_hours_week = colDef(
+      name = "Available Hours per Week",
+      maxWidth = 130,
+      headerStyle = list(background = "#7f7f7f", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = 'sum',
+      format = colFormat(separators = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
+    sched_util = colDef(
+      name = "Schedule Utilization",
+      maxWidth = 130,
+      headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours = 0
+        let totalsched_hours = 0
+        rows.forEach(function(row) {
+          totalavail_hours += row['avail_hours']
+          totalsched_hours += row['sched_hours']
+        })
+        return (totalsched_hours) / totalavail_hours 
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+    
+    prov_util = colDef(
+      name = "Provider Utilization",
+      maxWidth = 130,
+      headerStyle = list(background = "#212070", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours = 0
+        let totalarrived_hours = 0
+        rows.forEach(function(row) {
+          totalavail_hours += row['avail_hours']
+          totalarrived_hours += row['arrived_hours']
+        })
+        return (totalarrived_hours) / totalavail_hours 
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
+    sched_util_day_MON = colDef(
+      name = "Mon",
+      maxWidth = 60,
+      headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours_day_MON = 0
+        let totalsched_hours_day_MON = 0
+        rows.forEach(function(row) {
+          totalavail_hours_day_MON += row['avail_hours_day_MON']
+          totalsched_hours_day_MON += row['sched_hours_day_MON']
+        })
+        return (totalsched_hours_day_MON) / totalavail_hours_day_MON >= 0 ? (totalsched_hours_day_MON) / totalavail_hours_day_MON : '-'
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
+    sched_util_day_TUE = colDef(
+      name = "Tue",
+      maxWidth = 60,
+      headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours_day_TUE = 0
+        let totalsched_hours_day_TUE = 0
+        rows.forEach(function(row) {
+          totalavail_hours_day_TUE += row['avail_hours_day_TUE']
+          totalsched_hours_day_TUE += row['sched_hours_day_TUE']
+        })
+        return (totalsched_hours_day_TUE) / totalavail_hours_day_TUE >= 0 ? (totalsched_hours_day_TUE) / totalavail_hours_day_TUE : '-'
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
+    sched_util_day_WED = colDef(
+      name = "Wed",
+      maxWidth = 60,
+      headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours_day_WED = 0
+        let totalsched_hours_day_WED = 0
+        rows.forEach(function(row) {
+          totalavail_hours_day_WED += row['avail_hours_day_WED']
+          totalsched_hours_day_WED += row['sched_hours_day_WED']
+        })
+        return (totalsched_hours_day_WED) / totalavail_hours_day_WED >= 0 ? (totalsched_hours_day_WED) / totalavail_hours_day_WED : '-'
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
+    sched_util_day_THU = colDef(
+      name = "Thu",
+      maxWidth = 60,
+      headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours_day_THU = 0
+        let totalsched_hours_day_THU = 0
+        rows.forEach(function(row) {
+          totalavail_hours_day_THU += row['avail_hours_day_THU']
+          totalsched_hours_day_THU += row['sched_hours_day_THU']
+        })
+        return (totalsched_hours_day_THU) / totalavail_hours_day_THU >= 0 ? (totalsched_hours_day_THU) / totalavail_hours_day_THU : '-'
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
+    sched_util_day_FRI = colDef(
+      name = "Fri",
+      maxWidth = 60,
+      headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours_day_FRI = 0
+        let totalsched_hours_day_FRI = 0
+        rows.forEach(function(row) {
+          totalavail_hours_day_FRI += row['avail_hours_day_FRI']
+          totalsched_hours_day_FRI += row['sched_hours_day_FRI']
+        })
+        return (totalsched_hours_day_FRI) / totalavail_hours_day_FRI >= 0 ? (totalsched_hours_day_FRI) / totalavail_hours_day_FRI : '-'
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
+    sched_util_day_SAT = colDef(
+      name = "Sat",
+      maxWidth = 60,
+      headerStyle = list(background = "#d80b8c", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours_day_SAT = 0
+        let totalsched_hours_day_SAT = 0
+        rows.forEach(function(row) {
+          totalavail_hours_day_SAT += row['avail_hours_day_SAT']
+          totalsched_hours_day_SAT += row['sched_hours_day_SAT']
+        })
+        return (totalsched_hours_day_SAT) / totalavail_hours_day_SAT >= 0 ? (totalsched_hours_day_SAT) / totalavail_hours_day_SAT : '-'
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
+    prov_util_day_MON = colDef(
+      name = "Mon",
+      maxWidth = 60,
+      headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours_day_MON = 0
+        let totalarrived_hours_day_MON = 0
+        rows.forEach(function(row) {
+          totalavail_hours_day_MON += row['avail_hours_day_MON']
+          totalarrived_hours_day_MON += row['arrived_hours_day_MON']
+        })
+        return (totalarrived_hours_day_MON) / totalavail_hours_day_MON >= 0 ? (totalarrived_hours_day_MON) / totalavail_hours_day_MON : '-'
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
+    prov_util_day_TUE = colDef(
+      name = "Tue",
+      maxWidth = 60,
+      headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours_day_TUE = 0
+        let totalarrived_hours_day_TUE = 0
+        rows.forEach(function(row) {
+          totalavail_hours_day_TUE += row['avail_hours_day_TUE']
+          totalarrived_hours_day_TUE += row['arrived_hours_day_TUE']
+        })
+        return (totalarrived_hours_day_TUE) / totalavail_hours_day_TUE >= 0 ? (totalarrived_hours_day_TUE) / totalavail_hours_day_TUE : '-'
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
+    prov_util_day_WED = colDef(
+      name = "Wed",
+      maxWidth = 60,
+      headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours_day_WED = 0
+        let totalarrived_hours_day_WED = 0
+        rows.forEach(function(row) {
+          totalavail_hours_day_WED += row['avail_hours_day_WED']
+          totalarrived_hours_day_WED += row['arrived_hours_day_WED']
+        })
+        return (totalarrived_hours_day_WED) / totalavail_hours_day_WED >= 0 ? (totalarrived_hours_day_WED) / totalavail_hours_day_WED : '-'
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
+    prov_util_day_THU = colDef(
+      name = "Thu",
+      maxWidth = 60,
+      headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours_day_THU = 0
+        let totalarrived_hours_day_THU = 0
+        rows.forEach(function(row) {
+          totalavail_hours_day_THU += row['avail_hours_day_THU']
+          totalarrived_hours_day_THU += row['arrived_hours_day_THU']
+        })
+        return (totalarrived_hours_day_THU) / totalavail_hours_day_THU >= 0 ? (totalarrived_hours_day_THU) / totalavail_hours_day_THU : '-'
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
+    prov_util_day_FRI = colDef(
+      name = "Fri",
+      maxWidth = 60,
+      headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours_day_FRI = 0
+        let totalarrived_hours_day_FRI = 0
+        rows.forEach(function(row) {
+          totalavail_hours_day_FRI += row['avail_hours_day_FRI']
+          totalarrived_hours_day_FRI += row['arrived_hours_day_FRI']
+        })
+        return (totalarrived_hours_day_FRI) / totalavail_hours_day_FRI >= 0 ? (totalarrived_hours_day_FRI) / totalavail_hours_day_FRI : '-'
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+
+    prov_util_day_SAT = colDef(
+      name = "Sat",
+      maxWidth = 60,
+      headerStyle = list(background = "#00aeef", color = "white", fontWeight = "Bold", fontSize = "14px"),
+      aggregate = JS("function(values, rows) {
+        let totalavail_hours_day_SAT = 0
+        let totalarrived_hours_day_SAT = 0
+        rows.forEach(function(row) {
+          totalavail_hours_day_SAT += row['avail_hours_day_SAT']
+          totalarrived_hours_day_SAT += row['arrived_hours_day_SAT']
+        })
+        return (totalarrived_hours_day_SAT) / totalavail_hours_day_SAT >= 0 ? (totalarrived_hours_day_SAT) / totalavail_hours_day_SAT : '-'
+      }"),
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
+    ),
+    
+    PROV_ID = colDef(show =F),
+    DEPARTMENT_ID = colDef(show =F),
+    sched_hours = colDef(show =F),
+    arrived_hours = colDef(show =F),
+    avail_hours_day_MON = colDef(show =F),
+    avail_hours_day_TUE = colDef(show =F),
+    avail_hours_day_WED = colDef(show =F),
+    avail_hours_day_THU = colDef(show =F),
+    avail_hours_day_FRI = colDef(show =F),
+    avail_hours_day_SAT = colDef(show =F),
+    sched_hours_day_MON = colDef(show =F),
+    sched_hours_day_TUE = colDef(show =F),
+    sched_hours_day_WED = colDef(show =F),
+    sched_hours_day_THU = colDef(show =F),
+    sched_hours_day_FRI = colDef(show =F),
+    sched_hours_day_SAT = colDef(show =F),
+    arrived_hours_day_MON = colDef(show =F),
+    arrived_hours_day_TUE = colDef(show =F),
+    arrived_hours_day_WED = colDef(show =F),
+    arrived_hours_day_THU = colDef(show =F),
+    arrived_hours_day_FRI = colDef(show =F),
+    arrived_hours_day_SAT = colDef(show =F)
+   
+  ) # Close Columns
+
+  ) # Close Reactable
+
+ ) # Close tagList
+) # Close htmltools
+
+
+```
+<br/>
+<br/>
+<br/>
+
+
+### TEMPLATE UTILIZATION (Providers)
+#### Includes Physician, Fellow, Resident, Dentist, Physician Assistant, and Nurse Practitioner
+```{r Utilization by Month Table Output Providers Only, echo = FALSE, warning = FALSE, message = FALSE}
+
+
+# Table Output -----------------------------------------------------------------
+htmltools::browsable(
+  tagList(
+    tags$button(
+      tagList(fontawesome::fa("download"), "Download Table"),
+      onclick = "Reactable.downloadDataCSV('template-util-table', 'Template Utilization (Providers)')"
     ),
 
 # htmltools::browsable(
