@@ -363,12 +363,7 @@ coverage_tbl <- tbl(conn2, "V_PAT_ENC_COVERAGE")
 clarity_ser_tbl <- tbl(conn2, "CLARITY_SER")
 
 slot_view_tbl <- tbl(conn3, in_schema("OAO_PRODUCTION", "AMBULATORY_SLOT_TABLE"))
-# 
-# temp_slot_tbl <- tbl(conn4, "AMBULATORY_SLOT_TABLE_TEMP")
-# 
-# temp_slot <- temp_slot_tbl %>%
-#   head(10) %>%
-#   collect()
+
 
 ```
 
@@ -448,7 +443,8 @@ knitr::include_graphics("Mount_Sinai_Logo_H.png")
 # Template Utilization Report
 *Report run date: `r report_run_date`*<br/>
 *Report data range: Includes templates from `r start_date` to `r end_date`*<br/>
-*Excludes Non-Epic Scheduling Sites: MSH-AMBULATORY CARE, NYEE*<br/>
+*Data shown for pre-Cerner to EPIC go-live should be disregarded: MSH-Amb Care (EPIC go-live in May 2024)*<br/>
+*Excludes Non-Epic Scheduling Sites: NYEE*<br/>
 _________________________________________________________________________________________________________________________________________________________
 <br/>
 <br/>
