@@ -643,7 +643,7 @@ reactable(
           totalavail_hours_day_MON += row['avail_hours_day_MON']
           totalsched_hours_day_MON += row['sched_hours_day_MON']
         })
-        return (totalsched_hours_day_MON) / totalavail_hours_day_MON >= 0 ? (totalsched_hours_day_MON) / totalavail_hours_day_MON : '-'
+        return totalavail_hours_day_MON > 0 ? (totalsched_hours_day_MON) / totalavail_hours_day_MON : '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
@@ -660,7 +660,7 @@ reactable(
           totalavail_hours_day_TUE += row['avail_hours_day_TUE']
           totalsched_hours_day_TUE += row['sched_hours_day_TUE']
         })
-        return (totalsched_hours_day_TUE) / totalavail_hours_day_TUE >= 0 ? (totalsched_hours_day_TUE) / totalavail_hours_day_TUE : '-'
+        return totalavail_hours_day_TUE > 0 ? (totalsched_hours_day_TUE) / totalavail_hours_day_TUE : '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
@@ -677,7 +677,7 @@ reactable(
           totalavail_hours_day_WED += row['avail_hours_day_WED']
           totalsched_hours_day_WED += row['sched_hours_day_WED']
         })
-        return (totalsched_hours_day_WED) / totalavail_hours_day_WED >= 0 ? (totalsched_hours_day_WED) / totalavail_hours_day_WED : '-'
+        return totalavail_hours_day_WED >=0 ? (totalsched_hours_day_WED) / totalavail_hours_day_WED : '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
@@ -694,7 +694,7 @@ reactable(
           totalavail_hours_day_THU += row['avail_hours_day_THU']
           totalsched_hours_day_THU += row['sched_hours_day_THU']
         })
-        return (totalsched_hours_day_THU) / totalavail_hours_day_THU >= 0 ? (totalsched_hours_day_THU) / totalavail_hours_day_THU : '-'
+        return totalavail_hours_day_THU > 0 ? (totalsched_hours_day_THU) / totalavail_hours_day_THU : '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
@@ -711,7 +711,7 @@ reactable(
           totalavail_hours_day_FRI += row['avail_hours_day_FRI']
           totalsched_hours_day_FRI += row['sched_hours_day_FRI']
         })
-        return (totalsched_hours_day_FRI) / totalavail_hours_day_FRI >= 0 ? (totalsched_hours_day_FRI) / totalavail_hours_day_FRI : '-'
+        return totalavail_hours_day_FRI > 0 ? (totalsched_hours_day_FRI) / totalavail_hours_day_FRI : '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
@@ -728,7 +728,7 @@ reactable(
           totalavail_hours_day_SAT += row['avail_hours_day_SAT']
           totalsched_hours_day_SAT += row['sched_hours_day_SAT']
         })
-        return (totalsched_hours_day_SAT) / totalavail_hours_day_SAT >= 0 ? (totalsched_hours_day_SAT) / totalavail_hours_day_SAT : '-'
+        return totalavail_hours_day_SAT > 0 ? (totalsched_hours_day_SAT) / totalavail_hours_day_SAT : '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
@@ -745,7 +745,7 @@ reactable(
           totalavail_hours_day_MON += row['avail_hours_day_MON']
           totalarrived_hours_day_MON += row['arrived_hours_day_MON']
         })
-        return (totalarrived_hours_day_MON) / totalavail_hours_day_MON >= 0 ? (totalarrived_hours_day_MON) / totalavail_hours_day_MON : '-'
+        return totalavail_hours_day_MON > 0 ? (totalarrived_hours_day_MON) / totalavail_hours_day_MON : '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
@@ -762,7 +762,7 @@ reactable(
           totalavail_hours_day_TUE += row['avail_hours_day_TUE']
           totalarrived_hours_day_TUE += row['arrived_hours_day_TUE']
         })
-        return (totalarrived_hours_day_TUE) / totalavail_hours_day_TUE >= 0 ? (totalarrived_hours_day_TUE) / totalavail_hours_day_TUE : '-'
+        return totalavail_hours_day_TUE > 0 ? (totalarrived_hours_day_TUE) / totalavail_hours_day_TUE : '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
@@ -779,7 +779,7 @@ reactable(
           totalavail_hours_day_WED += row['avail_hours_day_WED']
           totalarrived_hours_day_WED += row['arrived_hours_day_WED']
         })
-        return (totalarrived_hours_day_WED) / totalavail_hours_day_WED >= 0 ? (totalarrived_hours_day_WED) / totalavail_hours_day_WED : '-'
+        return totalavail_hours_day_WED > 0 ? (totalarrived_hours_day_WED) / totalavail_hours_day_WED : '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
@@ -796,7 +796,7 @@ reactable(
           totalavail_hours_day_THU += row['avail_hours_day_THU']
           totalarrived_hours_day_THU += row['arrived_hours_day_THU']
         })
-        return (totalarrived_hours_day_THU) / totalavail_hours_day_THU >= 0 ? (totalarrived_hours_day_THU) / totalavail_hours_day_THU : '-'
+        return totalavail_hours_day_THU > 0 ? (totalarrived_hours_day_THU) / totalavail_hours_day_THU : '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
@@ -813,7 +813,7 @@ reactable(
           totalavail_hours_day_FRI += row['avail_hours_day_FRI']
           totalarrived_hours_day_FRI += row['arrived_hours_day_FRI']
         })
-        return (totalarrived_hours_day_FRI) / totalavail_hours_day_FRI >= 0 ? (totalarrived_hours_day_FRI) / totalavail_hours_day_FRI : '-'
+        return totalavail_hours_day_FRI > 0 ? (totalarrived_hours_day_FRI) / totalavail_hours_day_FRI : '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
@@ -830,7 +830,7 @@ reactable(
           totalavail_hours_day_SAT += row['avail_hours_day_SAT']
           totalarrived_hours_day_SAT += row['arrived_hours_day_SAT']
         })
-        return (totalarrived_hours_day_SAT) / totalavail_hours_day_SAT >= 0 ? (totalarrived_hours_day_SAT) / totalavail_hours_day_SAT : '-'
+        return totalavail_hours_day_SAT > 0 ? (totalarrived_hours_day_SAT) / totalavail_hours_day_SAT : '-'
       }"),
       format = colFormat(percent = TRUE, digits = 0),
       style = list(borderLeft = "1.5px solid rgb(230, 230, 230)")
