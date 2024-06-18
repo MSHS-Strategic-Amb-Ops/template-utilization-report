@@ -401,9 +401,9 @@ slot_util_day <- slot_view_tbl %>%
   group_by(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR, APPT_DAY) %>%
   summarise(avail_hours_day = sum(AVAILABLE_MINS, na.rm = T)/60,
             sched_hours_day = sum(SCHEDULED_MINS, na.rm = T)/60,
-            arrived_hours_day = sum(ARRIVED_MINS, na.rm = T)/60,
-            sched_util_day = (sum(SCHEDULED_MINS)/sum(AVAILABLE_MINS))/60,
-            prov_util_day = (sum(ARRIVED_MINS)/sum(SCHEDULED_MINS))/60) %>%
+            arrived_hours_day = sum(ARRIVED_MINS, na.rm = T)/60) %>%
+  mutate(sched_util_day = sched_hours_day/avail_hours_day,
+            prov_util_day = arrived_hours_day/avail_hours_day) %>%
   pivot_wider(names_from = APPT_DAY,
               values_from = avail_hours_day:prov_util_day) %>%
   collect()
