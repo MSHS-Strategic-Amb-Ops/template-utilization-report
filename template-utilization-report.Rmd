@@ -480,7 +480,7 @@ htmltools::browsable(
 
 reactable(
   slot_util_summary %>%
-    filter(CAMPUS %!in% c("MSH- AMBULATORY CARE", "NYEE", "OTHER", "MS NOW", "MSHP")) %>%
+    filter(CAMPUS %!in% c("NYEE", "OTHER", "MS NOW", "MSHP")) %>%
     filter(!is.na(CAMPUS)) %>%
     filter(PROV_TYPE %in% c("Physician")) %>%
     mutate(MSHS = "MSHS") %>%
@@ -902,7 +902,7 @@ htmltools::browsable(
 
 reactable(
   slot_util_summary %>%
-    filter(CAMPUS %!in% c("MSH- AMBULATORY CARE", "NYEE", "OTHER", "MS NOW", "MSHP")) %>%
+    filter(CAMPUS %!in% c("NYEE", "OTHER", "MS NOW", "MSHP")) %>%
     filter(!is.na(CAMPUS)) %>%
     filter(PROV_TYPE %in% c("Physician", "Resident", "Fellow", "Dentist", "Physician Assistant", "Nurse Practitioner")) %>%
     mutate(MSHS = "MSHS") %>%
@@ -1323,7 +1323,7 @@ htmltools::browsable(
 
 reactable(
   slot_util_summary %>%
-    filter(CAMPUS %!in% c("MSH- AMBULATORY CARE", "NYEE", "OTHER", "MS NOW", "MSHP")) %>%
+    filter(CAMPUS %!in% c("NYEE", "OTHER", "MS NOW", "MSHP")) %>%
     filter(!is.na(CAMPUS)) %>%
     filter(PROV_TYPE %!in% c("Physician", "Resident", "Fellow", "Dentist", "Physician Assistant", "Nurse Practitioner")) %>%
     mutate(MSHS = "MSHS") %>%
