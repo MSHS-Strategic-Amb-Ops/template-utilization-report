@@ -330,7 +330,7 @@ report_run_date <- Sys.Date()
 end_date <- format(as.Date(Sys.Date()-1), "%Y-%m-%d") 
 start_date <- paste0(format(as.Date(end_date) %m-% months(3), "%Y-%m"),"-01")
 
-
+start_date_epic <- paste0(format(as.Date("2024-05-01"), "%Y-%m"),"-01")
 
 # start_date <- paste0(format(as.Date("2023-01-2023"), "%Y-%m-%d"), " 00:00:00") 
 # end_date <- paste0(format(as.Date(Sys.Date()-1), "%Y-%m-%d"), " 00:00:00") 
@@ -363,7 +363,6 @@ coverage_tbl <- tbl(conn2, "V_PAT_ENC_COVERAGE")
 clarity_ser_tbl <- tbl(conn2, "CLARITY_SER")
 
 slot_view_tbl <- tbl(conn3, in_schema("OAO_PRODUCTION", "AMBULATORY_SLOT_TABLE"))
-
 
 ```
 
@@ -481,6 +480,7 @@ htmltools::browsable(
 reactable(
   slot_util_summary %>%
     filter(CAMPUS %!in% c("NYEE", "OTHER", "MS NOW", "MSHP")) %>%
+    filter(!(CAMPUS %in% c("MSH- AMBULATORY CARE") & SLOT_MONTH_YEAR %in% c("2024-03","2024-04"))) %>%
     filter(!is.na(CAMPUS)) %>%
     filter(PROV_TYPE %in% c("Physician")) %>%
     mutate(MSHS = "MSHS") %>%
@@ -903,6 +903,7 @@ htmltools::browsable(
 reactable(
   slot_util_summary %>%
     filter(CAMPUS %!in% c("NYEE", "OTHER", "MS NOW", "MSHP")) %>%
+    filter(!(CAMPUS %in% c("MSH- AMBULATORY CARE") & SLOT_MONTH_YEAR %in% c("2024-03","2024-04"))) %>%
     filter(!is.na(CAMPUS)) %>%
     filter(PROV_TYPE %in% c("Physician", "Resident", "Fellow", "Dentist", "Physician Assistant", "Nurse Practitioner")) %>%
     mutate(MSHS = "MSHS") %>%
@@ -1324,6 +1325,7 @@ htmltools::browsable(
 reactable(
   slot_util_summary %>%
     filter(CAMPUS %!in% c("NYEE", "OTHER", "MS NOW", "MSHP")) %>%
+    filter(!(CAMPUS %in% c("MSH- AMBULATORY CARE") & SLOT_MONTH_YEAR %in% c("2024-03","2024-04"))) %>%
     filter(!is.na(CAMPUS)) %>%
     filter(PROV_TYPE %!in% c("Physician", "Resident", "Fellow", "Dentist", "Physician Assistant", "Nurse Practitioner")) %>%
     mutate(MSHS = "MSHS") %>%
