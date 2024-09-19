@@ -361,6 +361,8 @@ block_name_tbl <- tbl(conn2, "ZC_APPT_BLOCK")
 orders_raw_tbl <- tbl(conn2, "ORDER_PROC")
 coverage_tbl <- tbl(conn2, "V_PAT_ENC_COVERAGE")
 clarity_ser_tbl <- tbl(conn2, "CLARITY_SER")
+clarity_ser_spec_tbl <- tbl(conn2, "CLARITY_SER_SPEC")
+zc_specialty_tbl <- tbl(conn2, "ZC_SPECIALTY")
 
 slot_view_tbl <- tbl(conn3, in_schema("OAO_PRODUCTION", "AMBULATORY_SLOT_TABLE"))
 
@@ -390,8 +392,15 @@ slot_util_month <- slot_view_tbl %>%
 slot_util_month <- slot_util_month %>%
     left_join(clarity_ser_tbl %>% 
               dplyr::select(PROV_ID, PROV_TYPE),
-            copy = TRUE)
-
+            copy = TRUE) %>%
+  left_join(clarity_ser_spec_tbl %>%
+              dplyr::select(PROV_ID, SPECIALTY_C),
+            copy = TRUE) %>%
+  left_join(zc_specialty_tbl %>%
+              dplyr::select(SPECIALTY_C, NAME),
+            copy = TRUE) %>%
+  rename("PROV_SPECIALTY" = NAME)
+  
 
 slot_util_day <- slot_view_tbl %>%
   mutate(slot_year = year(SLOT_DATE)) %>%
@@ -417,7 +426,7 @@ slot_util_summary <- slot_util_summary %>%
 
 
 slot_util_summary <- slot_util_summary %>%
-  dplyr::select(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, SLOT_MONTH_YEAR,
+  dplyr::select(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, PROV_SPECIALTY, SLOT_MONTH_YEAR,
                 avail_hours, avail_hours_week, sched_hours, arrived_hours, 
                 sched_util, prov_util,
                 avail_hours_day_MON, avail_hours_day_TUE, avail_hours_day_WED, avail_hours_day_THU, avail_hours_day_FRI,
@@ -485,7 +494,7 @@ reactable(
     filter(PROV_TYPE %in% c("Physician")) %>%
     mutate(MSHS = "MSHS") %>%
     arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR) %>%
-    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, SLOT_MONTH_YEAR,
+    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, PROV_SPECIALTY, SLOT_MONTH_YEAR,
                 avail_hours, avail_hours_week, sched_hours, arrived_hours, 
                 sched_util, prov_util,
                 avail_hours_day_MON, avail_hours_day_TUE, avail_hours_day_WED, avail_hours_day_THU, avail_hours_day_FRI,
@@ -837,6 +846,7 @@ reactable(
     ),
     
     PROV_ID = colDef(show =F),
+    PROV_SPECIALTY = colDef(show =F),
     DEPARTMENT_ID = colDef(show =F),
     sched_hours = colDef(show =F),
     arrived_hours = colDef(show =F),
@@ -908,7 +918,7 @@ reactable(
     filter(PROV_TYPE %in% c("Physician", "Resident", "Fellow", "Dentist", "Physician Assistant", "Nurse Practitioner")) %>%
     mutate(MSHS = "MSHS") %>%
     arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR) %>%
-    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, SLOT_MONTH_YEAR,
+    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, PROV_SPECIALTY, SLOT_MONTH_YEAR,
                 avail_hours, avail_hours_week, sched_hours, arrived_hours, 
                 sched_util, prov_util,
                 avail_hours_day_MON, avail_hours_day_TUE, avail_hours_day_WED, avail_hours_day_THU, avail_hours_day_FRI,
@@ -1260,6 +1270,7 @@ reactable(
     ),
     
     PROV_ID = colDef(show =F),
+    PROV_SPECIALTY = colDef(show =F),
     DEPARTMENT_ID = colDef(show =F),
     sched_hours = colDef(show =F),
     arrived_hours = colDef(show =F),
@@ -1330,7 +1341,7 @@ reactable(
     filter(PROV_TYPE %!in% c("Physician", "Resident", "Fellow", "Dentist", "Physician Assistant", "Nurse Practitioner")) %>%
     mutate(MSHS = "MSHS") %>%
     arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR) %>%
-    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, SLOT_MONTH_YEAR,
+    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, PROV_SPECIALTY, SLOT_MONTH_YEAR,
                 avail_hours, avail_hours_week, sched_hours, arrived_hours, 
                 sched_util, prov_util,
                 avail_hours_day_MON, avail_hours_day_TUE, avail_hours_day_WED, avail_hours_day_THU, avail_hours_day_FRI,
@@ -1682,6 +1693,7 @@ reactable(
     ),
     
     PROV_ID = colDef(show =F),
+    PROV_SPECIALTY = colDef(show =F),
     DEPARTMENT_ID = colDef(show =F),
     sched_hours = colDef(show =F),
     arrived_hours = colDef(show =F),
