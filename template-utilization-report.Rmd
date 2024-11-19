@@ -327,7 +327,7 @@ report_run_date <- Sys.Date()
 
 # start_date <- format(as.Date("2023-01-01"), "%Y-%m-%d")
 
-end_date <- format(as.Date(Sys.Date()-1), "%Y-%m-%d") 
+end_date <- format(as.Date(Sys.Date()+14), "%Y-%m-%d") 
 start_date <- paste0(format(as.Date(end_date) %m-% months(3), "%Y-%m"),"-01")
 
 start_date_epic <- paste0(format(as.Date("2024-05-01"), "%Y-%m"),"-01")
@@ -366,10 +366,32 @@ zc_specialty_tbl <- tbl(conn2, "ZC_SPECIALTY")
 
 slot_view_tbl <- tbl(conn3, in_schema("OAO_PRODUCTION", "AMBULATORY_SLOT_TABLE"))
 
+slot_view <- slot_view_tbl %>%
+  head(10) %>%
+  collect()
+
 ```
 
 
 ```{r Slot Data Processing,  echo = FALSE, warning = FALSE, message = FALSE}
+
+slot_util_date <- slot_view_tbl %>%
+  mutate(slot_year = year(SLOT_DATE)) %>%
+  filter(SLOT_DATE >= TO_DATE(start_date, "YYYY-MM-DD HH24:MI:SS")) %>%
+  filter(SLOT_DATE <= TO_DATE(end_date, "YYYY-MM-DD HH24:MI:SS")) %>%
+  group_by(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROV_ID, PROVIDER, SLOT_DATE, APPT_WEEK) %>%
+  summarise(avail_hours = sum(AVAILABLE_MINS, na.rm = T)/60,
+            sched_hours = sum(SCHEDULED_MINS, na.rm = T)/60,
+            arrived_hours = sum(ARRIVED_MINS, na.rm = T)/60) %>%
+  group_by(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROV_ID, PROVIDER, SLOT_DATE) %>%
+  summarise(avail_hours = sum(avail_hours, na.rm = T),
+            avail_hours_week = mean(avail_hours, na.rm = T),
+            sched_hours = sum(sched_hours, na.rm = T),
+            arrived_hours = sum(arrived_hours)) %>%
+  mutate(sched_util = sched_hours/avail_hours,
+         prov_util = arrived_hours/avail_hours) %>%
+  collect()
+
 
 slot_util_month <- slot_view_tbl %>%
   mutate(slot_year = year(SLOT_DATE)) %>%
@@ -392,14 +414,14 @@ slot_util_month <- slot_view_tbl %>%
 slot_util_month <- slot_util_month %>%
     left_join(clarity_ser_tbl %>% 
               dplyr::select(PROV_ID, PROV_TYPE),
-            copy = TRUE) %>%
-  left_join(clarity_ser_spec_tbl %>%
-              dplyr::select(PROV_ID, SPECIALTY_C),
-            copy = TRUE) %>%
-  left_join(zc_specialty_tbl %>%
-              dplyr::select(SPECIALTY_C, NAME),
-            copy = TRUE) %>%
-  rename("PROV_SPECIALTY" = NAME)
+            copy = TRUE)
+  # left_join(clarity_ser_spec_tbl %>%
+  #             dplyr::select(PROV_ID, SPECIALTY_C),
+  #           copy = TRUE) 
+  # left_join(zc_specialty_tbl %>%
+  #             dplyr::select(SPECIALTY_C, NAME),
+  #           copy = TRUE) %>%
+  # rename("PROV_SPECIALTY" = NAME)
   
 
 slot_util_day <- slot_view_tbl %>%
@@ -426,7 +448,7 @@ slot_util_summary <- slot_util_summary %>%
 
 
 slot_util_summary <- slot_util_summary %>%
-  dplyr::select(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, PROV_SPECIALTY, SLOT_MONTH_YEAR,
+  dplyr::select(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, SLOT_MONTH_YEAR,
                 avail_hours, avail_hours_week, sched_hours, arrived_hours, 
                 sched_util, prov_util,
                 avail_hours_day_MON, avail_hours_day_TUE, avail_hours_day_WED, avail_hours_day_THU, avail_hours_day_FRI,
@@ -494,7 +516,7 @@ reactable(
     filter(PROV_TYPE %in% c("Physician")) %>%
     mutate(MSHS = "MSHS") %>%
     arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR) %>%
-    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, PROV_SPECIALTY, SLOT_MONTH_YEAR,
+    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, SLOT_MONTH_YEAR,
                 avail_hours, avail_hours_week, sched_hours, arrived_hours, 
                 sched_util, prov_util,
                 avail_hours_day_MON, avail_hours_day_TUE, avail_hours_day_WED, avail_hours_day_THU, avail_hours_day_FRI,
@@ -846,7 +868,6 @@ reactable(
     ),
     
     PROV_ID = colDef(show =F),
-    PROV_SPECIALTY = colDef(show =F),
     DEPARTMENT_ID = colDef(show =F),
     sched_hours = colDef(show =F),
     arrived_hours = colDef(show =F),
@@ -918,7 +939,7 @@ reactable(
     filter(PROV_TYPE %in% c("Physician", "Resident", "Fellow", "Dentist", "Physician Assistant", "Nurse Practitioner")) %>%
     mutate(MSHS = "MSHS") %>%
     arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR) %>%
-    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, PROV_SPECIALTY, SLOT_MONTH_YEAR,
+    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, SLOT_MONTH_YEAR,
                 avail_hours, avail_hours_week, sched_hours, arrived_hours, 
                 sched_util, prov_util,
                 avail_hours_day_MON, avail_hours_day_TUE, avail_hours_day_WED, avail_hours_day_THU, avail_hours_day_FRI,
@@ -1270,7 +1291,6 @@ reactable(
     ),
     
     PROV_ID = colDef(show =F),
-    PROV_SPECIALTY = colDef(show =F),
     DEPARTMENT_ID = colDef(show =F),
     sched_hours = colDef(show =F),
     arrived_hours = colDef(show =F),
@@ -1341,7 +1361,7 @@ reactable(
     filter(PROV_TYPE %!in% c("Physician", "Resident", "Fellow", "Dentist", "Physician Assistant", "Nurse Practitioner")) %>%
     mutate(MSHS = "MSHS") %>%
     arrange(CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, PROVIDER, SLOT_MONTH_YEAR) %>%
-    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, PROV_SPECIALTY, SLOT_MONTH_YEAR,
+    dplyr::select(MSHS, CAMPUS, CAMPUS_SPECIALTY, DEPARTMENT, DEPARTMENT_ID, PROVIDER, PROV_TYPE, SLOT_MONTH_YEAR,
                 avail_hours, avail_hours_week, sched_hours, arrived_hours, 
                 sched_util, prov_util,
                 avail_hours_day_MON, avail_hours_day_TUE, avail_hours_day_WED, avail_hours_day_THU, avail_hours_day_FRI,
@@ -1693,7 +1713,6 @@ reactable(
     ),
     
     PROV_ID = colDef(show =F),
-    PROV_SPECIALTY = colDef(show =F),
     DEPARTMENT_ID = colDef(show =F),
     sched_hours = colDef(show =F),
     arrived_hours = colDef(show =F),
